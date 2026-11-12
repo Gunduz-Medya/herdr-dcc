@@ -59,7 +59,10 @@ fn the_status_line_command_stores_reported_values_and_the_panel_data_keeps_the_p
     let doc = r#"{"model":{"id":"m"},"context_window":{"used_percentage":null},"rate_limits":{"five_hour":{"used_percentage":12.5,"resets_at":1900000000}}}"#;
     let o = statusline(&data, "abcdef12-aaaa", doc);
     assert!(o.status.success());
-    assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "dcc");
+    assert_eq!(
+        String::from_utf8_lossy(&o.stdout).trim(),
+        "ctx ? | 5h 12.5% | 7d ?"
+    );
 
     let v = show(&data);
     let ctx = v["context"].as_array().unwrap();
