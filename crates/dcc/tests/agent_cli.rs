@@ -179,13 +179,13 @@ fn a_hook_is_fast() {
 }
 
 #[test]
-fn the_status_line_prints_one_word_and_keeps_keys_not_values() {
+fn the_status_line_draws_the_reported_values_and_keeps_keys_not_values() {
     let data = scratch_dir("statusline");
     let json = r#"{"model":{"id":"VALUE-MODEL","display_name":"x"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":1}}}"#;
     let o = run_dcc(&data, &["agent", "statusline-log"], json, Some(RUN));
     assert_eq!(
         (o.status.code(), String::from_utf8_lossy(&o.stdout).trim()),
-        (Some(0), "dcc")
+        (Some(0), "x | ctx 8% | 5h 1% | 7d ?")
     );
     let text = std::fs::read_to_string(data.join("agents").join(RUN).join("statusline-keys.json"))
         .unwrap();
@@ -194,12 +194,15 @@ fn the_status_line_prints_one_word_and_keeps_keys_not_values() {
             && text.contains("rate_limits.five_hour.used_percentage")
     );
     assert!(!text.contains("VALUE-MODEL"));
-    // garbage and a missing run id still print the word and exit 0
-    for (stdin, run) in [("garbage", Some(RUN)), (json, None)] {
+    // garbage prints the word, a missing run id still draws the line (nothing is stored), both exit 0
+    for (stdin, run, want) in [
+        ("garbage", Some(RUN), "dcc"),
+        (json, None, "x | ctx 8% | 5h 1% | 7d ?"),
+    ] {
         let o = run_dcc(&data, &["agent", "statusline-log"], stdin, run);
         assert_eq!(
             (o.status.code(), String::from_utf8_lossy(&o.stdout).trim()),
-            (Some(0), "dcc")
+            (Some(0), want)
         );
     }
 }

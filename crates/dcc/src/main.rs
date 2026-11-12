@@ -1056,10 +1056,10 @@ fn herdr_cmd(dir: &Option<PathBuf>, action: HerdrAction) -> Result<Value> {
 }
 
 /// A hook must never fail or slow an agent down. Everything is swallowed, errors are noted by kind only.
-fn hook_entry(dir: &Option<PathBuf>, statusline: bool) {
+fn hook_entry(dir: &Option<PathBuf>, statusline: bool) -> String {
     let mut raw = String::new();
     let _ = std::io::stdin().take(1024 * 1024).read_to_string(&mut raw);
-    let Some(dir) = dir else { return };
+    let Some(dir) = dir else { return raw };
     let run_id = std::env::var("DCC_RUN_ID")
         .ok()
         .filter(|r| hooks::valid_session_id(r));
@@ -1085,6 +1085,7 @@ fn hook_entry(dir: &Option<PathBuf>, statusline: bool) {
             let _ = writeln!(f, "{} {}", now_ms(), e.kind);
         }
     }
+    raw
 }
 
 fn agent_cmd(dir: &Option<PathBuf>, action: AgentAction) -> Result<Value> {
@@ -1339,14 +1340,14 @@ fn main() -> ExitCode {
         Command::Agent {
             action: AgentAction::HookLog,
         } => {
-            hook_entry(&dir, false);
+            let _ = hook_entry(&dir, false);
             return ExitCode::SUCCESS;
         }
         Command::Agent {
             action: AgentAction::StatuslineLog,
         } => {
-            hook_entry(&dir, true);
-            println!("dcc");
+            let raw = hook_entry(&dir, true);
+            println!("{}", statusline::display_line(&raw));
             return ExitCode::SUCCESS;
         }
         Command::Agent { action } => agent_cmd(&dir, action),
