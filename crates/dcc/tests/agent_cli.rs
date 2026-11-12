@@ -145,17 +145,23 @@ fn a_hook_always_exits_zero_whatever_goes_wrong() {
         .output()
         .unwrap();
     assert_eq!(o.status.code(), Some(0));
-    // and with a bad command line, which is the one case where a failure would block the agent
+    // and with a bad command line (an old settings file after a dcc update). Exit code 2 would
+    // block the tool call, so the hook and status line commands exit 0 even then.
+    for sub in ["hook-log", "statusline-log"] {
+        let o = Command::new(env!("CARGO_BIN_EXE_dcc"))
+            .args(["agent", sub, "--no-such-flag"])
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(o.status.code(), Some(0), "{sub}");
+    }
+    // any other command still reports a usage error
     let o = Command::new(env!("CARGO_BIN_EXE_dcc"))
-        .args(["agent", "hook-log", "--no-such-flag"])
+        .args(["agent", "snapshot", "--no-such-flag"])
         .stdin(Stdio::null())
         .output()
         .unwrap();
-    assert_ne!(
-        o.status.code(),
-        Some(0),
-        "a misspelled flag is a usage error (exit 2), documented as the one hook failure mode"
-    );
+    assert_eq!(o.status.code(), Some(2));
 }
 
 #[test]

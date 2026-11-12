@@ -660,10 +660,27 @@ fn diag_cmd(dir: &Option<PathBuf>, action: DiagAction) -> Result<Value> {
 }
 
 fn main() -> ExitCode {
+    // Exit code 2 from a hook blocks the tool call in Claude Code, so a hook command that fails to
+    // parse its own arguments (an old settings file after a dcc update) must still exit 0.
     let Cli {
         data_dir: dir,
         command,
-    } = Cli::parse();
+    } = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) => {
+            let args: Vec<String> = std::env::args().collect();
+            if args
+                .iter()
+                .any(|a| a == "hook-log" || a == "statusline-log")
+            {
+                if args.iter().any(|a| a == "statusline-log") {
+                    println!("dcc");
+                }
+                return ExitCode::SUCCESS;
+            }
+            e.exit();
+        }
+    };
     let result = match command {
         Command::Job {
             action: JobAction::Run { dir: job_dir, args },
