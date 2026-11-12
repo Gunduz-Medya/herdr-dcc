@@ -192,7 +192,8 @@ pub fn info(cwd: &str) -> Option<GitInfo> {
     // status compares file contents, which can run the clean filters of the repository
     let overrides = filter_overrides(cwd);
     let mut status_args: Vec<&str> = overrides.iter().map(String::as_str).collect();
-    status_args.extend(["status", "--porcelain"]);
+    // submodules are skipped, their own configuration could not be neutralised from here
+    status_args.extend(["status", "--porcelain", "--ignore-submodules=all"]);
     let counts = git(cwd, &status_args).map(|t| count_porcelain(&t));
     Some(GitInfo {
         repo_root: root,
