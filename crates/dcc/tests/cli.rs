@@ -228,7 +228,7 @@ fn ensure_layout_builds_then_skips_then_rebuilds() {
     let data = scratch_dir("cli-layout");
     let home = data.join("home");
     fs::create_dir_all(home.join("layouts")).unwrap();
-    fs::write(home.join("layouts/main.json"), json!({"id":"main","type":"column","children":[{"id":"tabs","type":"block","content":{"mod":"tabs"}},{"id":"panel","type":"column","children":[{"id":"panel-body","type":"stack","children":[{"id":"files","type":"block"}]}]}]}).to_string()).unwrap();
+    fs::write(home.join("layouts/main.json"), json!({"id":"main","type":"column","children":[{"id":"tabs","type":"block","content":{"mod":"tabs"}},{"id":"work-body","type":"row","children":[{"id":"panel","type":"column","children":[{"id":"panel-body","type":"stack","children":[{"id":"files","type":"block"}]}]}]}]}).to_string()).unwrap();
     let recipe = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../layouts/dcc.recipe.json");
     let run = |force: bool| {
         let mut c = dcc(&data);
@@ -245,10 +245,17 @@ fn ensure_layout_builds_then_skips_then_rebuilds() {
     let built: Value =
         serde_json::from_str(&fs::read_to_string(home.join("layouts/dcc.json")).unwrap()).unwrap();
     // the DCC panels sit in the side panel stack, after Herdr's own, and the tab bar is DCC's
-    let stack = &built["children"][1]["children"][0]["children"];
+    let work = &built["children"][1]["children"];
+    let stack = &work[0]["children"][0]["children"];
     assert_eq!(stack[0]["id"], "files");
     assert_eq!(stack[1]["content"]["mod"], "dcc-workspace");
     assert_eq!(stack.as_array().unwrap().len(), 7);
+    // a second, hidden slot with its own copy of every panel, so two can be open at once
+    assert_eq!(work[1]["id"], "dcc-panel-b");
+    assert_eq!(work[1]["hidden"], true);
+    let second = &work[1]["children"][0]["children"];
+    assert_eq!(second.as_array().unwrap().len(), 6);
+    assert_eq!(second[0]["id"], "dcc-workspace-b");
     assert_eq!(built["children"][0]["content"]["mod"], "dcc-tabs");
     assert_eq!(run(true)["reason"], "forced");
 }

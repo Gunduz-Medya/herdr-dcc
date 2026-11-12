@@ -61,6 +61,70 @@
           "mod": "dcc-usage"
         }
       }
+    },
+    {
+      "into": "work-body",
+      "block": {
+        "id": "dcc-panel-b",
+        "type": "column",
+        "hidden": true,
+        "min": 260,
+        "max": 700,
+        "size": {
+          "px": 360
+        },
+        "children": [
+          {
+            "id": "dcc-body-b",
+            "type": "stack",
+            "active": "dcc-workspace-b",
+            "children": [
+              {
+                "id": "dcc-workspace-b",
+                "type": "block",
+                "content": {
+                  "mod": "dcc-workspace"
+                }
+              },
+              {
+                "id": "dcc-agents-b",
+                "type": "block",
+                "content": {
+                  "mod": "dcc-agents"
+                }
+              },
+              {
+                "id": "dcc-ssh-b",
+                "type": "block",
+                "content": {
+                  "mod": "dcc-ssh"
+                }
+              },
+              {
+                "id": "dcc-code-b",
+                "type": "block",
+                "content": {
+                  "mod": "dcc-code"
+                }
+              },
+              {
+                "id": "dcc-config-b",
+                "type": "block",
+                "content": {
+                  "mod": "dcc-config"
+                }
+              },
+              {
+                "id": "dcc-usage-b",
+                "type": "block",
+                "content": {
+                  "mod": "dcc-usage"
+                }
+              }
+            ]
+          }
+        ]
+      }
     }
   ],
   "set": [
