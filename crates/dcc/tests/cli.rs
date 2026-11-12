@@ -252,3 +252,25 @@ fn ensure_layout_builds_then_skips_then_rebuilds() {
     assert_eq!(built["children"][0]["content"]["mod"], "dcc-tabs");
     assert_eq!(run(true)["reason"], "forced");
 }
+
+/// Herdr docks a new mod into whatever layout is shown, once, unless its `mod.json` says
+/// `place: none`. DCC panels belong only in the DCC layout, so every mod must say none.
+#[test]
+fn every_dcc_mod_says_place_none() {
+    let mods = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mods");
+    let mut seen = 0;
+    for entry in fs::read_dir(&mods).unwrap().flatten() {
+        let file = entry.path().join("mod.json");
+        if file.exists() {
+            let v: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+            assert_eq!(
+                v["place"],
+                "none",
+                "{} would dock itself into any layout",
+                file.display()
+            );
+            seen += 1;
+        }
+    }
+    assert!(seen >= 6);
+}

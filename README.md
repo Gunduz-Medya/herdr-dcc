@@ -88,6 +88,7 @@ What an install does and does not do.
 
 - It writes only the DCC mods (`mods/dcc-*`) and the DCC layout (`layouts/dcc.json`) into the app home. Your Herdr settings, other mods and other layouts are not touched.
 - Before writing it copies each file it is about to replace into `<data folder>/backups/<id>/` with a manifest. If a backup fails, nothing is written.
+- Every DCC mod is marked `place: none` in its `mod.json`. Herdr docks a new mod into the layout that happens to be shown unless it says so, which would push your terminal out of view. The DCC panels appear only in the `dcc` layout.
 - It does not switch your layout. Pick `dcc` yourself (ctrl-shift-l cycles layouts), and switch back to `main` any time.
 - The tab bar is derived at install time from the `tabs` mod you already have. If a Herdr update changes that file, the install stops with a clear message instead of writing a broken bar. No Herdr code is shipped in this repository.
 

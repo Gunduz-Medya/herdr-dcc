@@ -211,3 +211,10 @@ Kullanıcı dört panelin terminali kapattığını söyledi ve panellerin sağ 
   - Gerçek Herdr'a hiç kurulmadı. Kuru çalıştırma da gerçek klasöre karşı koşturulmadı (kullanıcı onayıyla yapılacak).
   - Yedek yalnızca değiştirilen DCC dosyalarını kapsıyor. Herdr'ın kendi ayarları DCC tarafından değiştirilmediği için yedeklenmiyor.
   - Kurulumun yazdığı `config.json` dosyaları o anki `dcc` ikilisinin yolunu içeriyor, ikili taşınırsa `install --apply` yeniden çalıştırılmalı.
+
+## Düzeltme, modların her düzene yerleşmesi (2026-11-12, branch `fix-mod-placement`)
+
+- Sorun. Gerçek Herdr'a kurulumdan sonra kullanıcı terminali göremedi. Sebep, DCC modlarının `mod.json` dosyalarındaki `place: right` ayarıydı. Herdr bir mod klasörünü ilk gördüğünde, `place` "none" değilse, o an gösterilen düzene her mod için bir blok ekliyor ve bunu düzen dosyasına yazıyor. Kullanıcının `herdr-skillshare` düzenine altı DCC bloğu eklendi ve terminali dışarı itti. Yalıtılmış denemelerde bu görülmedi, çünkü orada gösterilen düzen DCC düzeniydi ve bloklar zaten orada vardı.
+- Düzeltme. Altı DCC modunun hepsi `place: none` yapıldı. Yalıtılmış kopyada `main` düzeninde paneller artık kendiliğinden açılmıyor, `dcc` düzeninde sekme çubuğu düğmeleriyle açılıyor. Bir test her `mod.json` dosyasının `place: none` dediğini denetliyor.
+- Gerçek Herdr'da yapılanlar (kullanıcının terminalinin görünmesi için, ayrıca onay beklenmeden). `install --apply` ile modlar yeniden kuruldu (yedek `1794516045014`). Kullanıcının `herdr-skillshare.json` düzeninden Herdr'ın eklediği altı `dcc-` bloğu Herdr'ın kendi komutuyla (`layout.set`) çıkarıldı, önce dosyanın yedeği `~/.config/herdr-dcc/backups/layout-fix/herdr-skillshare.json.before` olarak alındı. Başka hiçbir düzen veya ayar değiştirilmedi. Ekran görüntüsünde terminal ve Skillshare paneli yerinde.
+- Açık sorun. Herdr kurulum sırasında gösterilen düzene blok ekleyebildiği için, kurulumdan önce `place` değerleri artık güvenli ama eski bir DCC sürümü kurulmuşsa aynı durum tekrar edebilir. Kurulum öncesi uyarı eklenmedi.
