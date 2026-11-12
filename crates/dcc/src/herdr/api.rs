@@ -167,22 +167,15 @@ pub fn status_of(t: &Value) -> Option<String> {
     }
 }
 
-pub fn parse_labeled(v: &Value, key: &str) -> Vec<LabeledTerminal> {
-    v.get("terminals")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|t| {
-            let value = t.get("labels")?.get(key)?.as_str()?.to_string();
-            Some(LabeledTerminal {
-                address: text(t, "address"),
-                value,
-                live: text(t, "state") == "live",
-                exit_code: t.get("exit_code").and_then(Value::as_i64),
-            })
-        })
-        .collect()
+/// One `hc ls` row and the matching `hc get` document, as a labeled terminal when it carries `key`.
+pub fn labeled_from(row: &Value, detail: &Value, key: &str) -> Option<LabeledTerminal> {
+    let value = detail.get("labels")?.get(key)?.as_str()?.to_string();
+    Some(LabeledTerminal {
+        address: text(row, "address"),
+        value,
+        live: text(row, "state") == "live",
+        exit_code: detail.get("exit_code").and_then(Value::as_i64),
+    })
 }
 
 pub struct CliHerdr;
@@ -232,8 +225,25 @@ impl Herdr for CliHerdr {
         Self::run("hc", &["kill", terminal]).map(|_| ())
     }
     fn labeled(&self, key: &str) -> Result<Vec<LabeledTerminal>> {
+        // `hc ls` does not list labels, `hc get` does. Only terminals dcc named itself are asked.
         let all = Self::run_json("hc", &["ls", "--all", "--json"])?;
-        Ok(parse_labeled(&all, key))
+        let mut out = Vec::new();
+        for row in all
+            .get("terminals")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            if !text(&row, "name").starts_with("dcc-") {
+                continue;
+            }
+            let address = text(&row, "address");
+            let Ok(detail) = Self::run_json("hc", &["get", &address, "--json"]) else {
+                continue;
+            };
+            out.extend(labeled_from(&row, &detail, key));
+        }
+        Ok(out)
     }
     fn terminal_status(&self, terminal: &str) -> Result<Option<String>> {
         let all = Self::run_json("hc", &["ls", "--json"])?;
@@ -305,14 +315,25 @@ mod tests {
     }
 
     #[test]
-    fn parses_labels_and_status() {
-        let v = json!({"terminals":[
-            {"address":"t1","state":"live","labels":{"dcc.forward":"a/b"}},
-            {"address":"t2","state":"finished","exit_code":255,"labels":{"dcc.forward":"a/c"}},
-            {"address":"t3","state":"live","labels":{"other":"x"}}]});
-        let l = parse_labeled(&v, "dcc.forward");
-        assert_eq!(l.len(), 2);
-        assert!(l[0].live && !l[1].live && l[1].exit_code == Some(255));
+    fn labels_come_from_the_detail_document_and_status_from_either_shape() {
+        let live = json!({"address":"t1","state":"live"});
+        let gone = json!({"address":"t2","state":"finished"});
+        let l = labeled_from(
+            &live,
+            &json!({"labels":{"dcc.forward":"a/b"}}),
+            "dcc.forward",
+        )
+        .unwrap();
+        assert!(l.live && l.value == "a/b" && l.exit_code.is_none());
+        let g = labeled_from(
+            &gone,
+            &json!({"labels":{"dcc.forward":"a/c"},"exit_code":255}),
+            "dcc.forward",
+        )
+        .unwrap();
+        assert!(!g.live && g.exit_code == Some(255));
+        assert!(labeled_from(&live, &json!({"labels":{"other":"x"}}), "dcc.forward").is_none());
+        assert!(labeled_from(&live, &json!({}), "dcc.forward").is_none());
         assert_eq!(
             status_of(&json!({"status":"blocked"})).as_deref(),
             Some("blocked")

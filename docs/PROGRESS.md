@@ -77,3 +77,30 @@ Her bölüm bir faz kaydıdır. Her kayıtta faz, tarih, ne yapıldı, test sonu
   - Güven sorusu bekleyen agent'ın Unknown notu gerçek Claude ile ayrıca denenmedi.
   - Starting shell pane'inin kapatılması canlı doğrulandı mı sorusu yalnızca agent'ların tek pane ile açılmasından dolaylı görüldü, ayrı test yok.
   - Gerçek Claude testi kullanıcı hesabıyla yapıldı, kota alanına bakılmadı (Faz 6).
+
+## Faz 3, SSH (2026-11-12, branch `phase-3-ssh`)
+
+- Ne yapıldı.
+  - `ssh` modülleri (model, db, tarayıcı, askpass, işlemler). Göç v3 (`ssh_groups`, `ssh_profiles`, `port_forwards`, `saved_commands`). Parola veya passphrase SQLite'ta yok, Keychain'de `ssh.<profil>` adıyla duruyor.
+  - Sır yolu. `dcc ssh run` (ssh'i başlatan süreç) Keychain'den değeri bir kez okuyor ve özel bir unix soketinden sunuyor (0700 klasör, 0600 soket). ssh `SSH_ASKPASS` ile küçük bir sarmalayıcıyı çalıştırıyor, o da `dcc ssh askpass` ile sokete soruyor. Soket yalnızca o çalıştırmaya özel rastgele nonce'u bilene, profilin beklediği türde bir istem için ve en fazla üç kez cevap veriyor. Host key sorusu her zaman reddediliyor. Değer argv'ye, dosyaya, log'a ve ekrana gitmiyor.
+  - Bağlantı `hc run` ile `ssh` space'inde kendi sekmesinde açılıyor (`herdr/tabs.rs` agent başlatma ile ortak). Yönlendirmeler (local, remote, dynamic) etiketli `hc run --bg` terminali, durum çekirdekten (`running`, `stopped`, `failed`, `idle`). Bind adresi yalnızca loopback.
+  - Kayıtlı komutlar tek satır, kayıtta sır deseni taraması (yalnızca tür söyleniyor, metin değil). Çalıştırma `hc send` ile, Herdr durumu blocked olan terminale `--force` olmadan yazılmıyor.
+  - Gizli giriş terminalde. `dcc ssh profile secret` yalnızca terminalde çalışıyor. Mod için `secret-tab` komutu gizli istemi ayrı bir sekmede açıyor, mod değeri görmüyor.
+  - `dcc-ssh` modu (profil listesi, Connect, Set secret, yönlendirme Start ve Stop, komut Run) ve `dcc ssh overview`. Layout tarifine eklendi.
+  - Güvenlik sertleştirmesi (otomatik taramadan). Çalışan ssh sistem yolundan seçiliyor, `DCC_SSH_PROGRAM` yalnızca debug derlemede ve mutlak yolla geçerli. Sır gerektiren profillerde `PermitLocalCommand=no` ve `KnownHostsCommand=none`.
+- Test sonucu.
+  - `cargo test` 125 birim, 7 agent CLI, 8 CLI, 4 ssh CLI, 3 xtask testi geçti. `cargo clippy --all-targets` temiz.
+  - Canlı senaryo (izole Herdr, yalnızca `127.0.0.1:2222` üzerinde kendi başlattığım sshd, `~/.ssh` kullanılmadı).
+    1. Kabul 1 geçti. Passphrase pty üzerinden gizli istemle Keychain'e girildi, değer isteme yankılanmadı. Sızıntı taraması (`xtask leak-scan`, 1260 dosya, süreç argümanları ve terminal ekranları) temiz, ayrıca CLI testi `secret get` olmadığını gösteriyor. Tarama bağlantılar ve yönlendirmeler çalışırken yapıldı.
+    2. Kabul 2 geçti. Anahtarlı profil ve passphrase'li profil sekmede açıldı, ön plandaki program dcc, kayıtlı komut uzak kabukta çalıştı (çıktı ekranda görüldü). Passphrase askpass ile verildi.
+    3. Kabul 3 geçti. Local, remote ve dynamic yönlendirme (ve passphrase'li profille local) açıkken HTTP isteği hedefe ulaştı, durum `running` görüldü, `stop` sonrası istek düştü ve durum `stopped` oldu. İkinci start reddedildi. Port dolu olan yönlendirme `failed` (çıkış 255) gösterdi.
+    4. Kabul 4 geçti. Kayıtlı komut seçilen terminalde çalıştı. Blocked terminal reddi sahte Herdr ile birim testte, canlı denenmedi.
+    5. Kabul 5. Gerçek uzak makine, parolayla gerçek giriş, `ssh-agent` ve SFTP gezgini bu fazda yapılmadı ve kapsam dışı.
+  - Temizlik. Test profilleri `--confirm` ile silindi (Keychain kaydı `ssh.pp1` silindi, yok), sshd kendi PID'siyle kapatıldı, `dev-down` uygulama ve çekirdeği PID ile kapalı doğruladı.
+- Açık sorun.
+  - Paneli gözle doğrulamadım (pencere ekran görüntüsüne gelmiyor, erişilebilirlik izni verilmedi). Modun `check` denetimi geçti ve layout `herdr-app status` hatasız, `dcc ssh overview` çıktısı elle denendi, düğmelere tıklanmadı.
+  - Parola (password) profili gerçek sshd ile denenmedi. Kök yetkisiz sshd parola doğrulayamıyor. Aynı yol (askpass sunucusu ve sarmalayıcı) passphrase ile canlı ve parola istemi için birim ve entegrasyon testinde denendi.
+  - Host key `strict` ile bilinmeyen host ve askpass bileşimi yalnızca birim testte (askpass reddi), canlı denenmedi.
+  - Askpass sunucusu çağıranı süreç kimliğiyle denetlemiyor (güvenli Rust ile olmuyor). ssh'in kendi başlattığı bir program (kullanıcı config'indeki ProxyCommand) nonce'u okuyabilir, sınırı üç cevap, yalnızca parola türü istem ve ssh çalıştığı süre. `askpass.rs` başında yazılı.
+  - Profil güncelleme komutu yok (silip yeniden ekleniyor). Gizli giriş, `-F` dosyası ve `KnownHostsCommand` OpenSSH 8.5 ve üstü gerektiriyor.
+  - Linux ve Windows'ta denenmedi, askpass Unix soketi ve `/dev/urandom` kullanıyor.
