@@ -248,7 +248,7 @@ fn ensure_layout_builds_then_skips_then_rebuilds() {
     let stack = &built["children"][1]["children"][0]["children"];
     assert_eq!(stack[0]["id"], "files");
     assert_eq!(stack[1]["content"]["mod"], "dcc-workspace");
-    assert_eq!(stack.as_array().unwrap().len(), 6);
+    assert_eq!(stack.as_array().unwrap().len(), 7);
     assert_eq!(built["children"][0]["content"]["mod"], "dcc-tabs");
     assert_eq!(run(true)["reason"], "forced");
 }

@@ -120,6 +120,20 @@ const MIGRATIONS: &[&str] = &[
         profile    TEXT REFERENCES ssh_profiles(name) ON DELETE SET NULL,
         created_ms INTEGER NOT NULL
      );",
+    // 4, usage samples. Only values the status line reported, as reported. Never an estimate.
+    "CREATE TABLE usage_samples (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts_ms           INTEGER NOT NULL,
+        run_id          TEXT NOT NULL REFERENCES agent_runs(id),
+        session_id      TEXT REFERENCES agent_sessions(id),
+        kind            TEXT NOT NULL,
+        window          TEXT NOT NULL,
+        used_percentage REAL,
+        resets_at_ms    INTEGER,
+        source          TEXT NOT NULL
+     );
+     CREATE INDEX usage_samples_run ON usage_samples (run_id, kind, window, ts_ms);
+     CREATE INDEX usage_samples_ts ON usage_samples (ts_ms);",
 ];
 
 pub struct Store {
@@ -322,6 +336,7 @@ mod tests {
                 "saved_commands",
                 "ssh_groups",
                 "ssh_profiles",
+                "usage_samples",
                 "workspaces"
             ]
         );

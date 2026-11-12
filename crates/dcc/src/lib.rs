@@ -9,6 +9,7 @@ pub mod jobs;
 pub mod secret;
 pub mod ssh;
 pub mod store;
+pub mod usage;
 pub mod util;
 pub mod workspace;
 

@@ -59,6 +59,11 @@ enum Command {
         #[command(subcommand)]
         action: AgentAction,
     },
+    /// Context use and account quota as the agent's status line reported them.
+    Usage {
+        #[command(subcommand)]
+        action: UsageAction,
+    },
     /// AI tool configuration, read only, and Skillshare calls.
     Config {
         /// The home the AI tool configuration is read from. Also read from DCC_AI_HOME.
@@ -86,6 +91,24 @@ enum Command {
     Debug {
         #[command(subcommand)]
         action: DebugAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum UsageAction {
+    /// Context per open run and the quota windows, each "unavailable" when there is no source.
+    Show,
+    /// Stored samples, only from the time DCC was running.
+    History {
+        /// context or quota.
+        #[arg(long)]
+        kind: String,
+        #[arg(long)]
+        window: Option<String>,
+        #[arg(long, default_value_t = 24)]
+        hours: i64,
+        #[arg(long, default_value_t = 200)]
+        limit: i64,
     },
 }
 
@@ -973,7 +996,10 @@ fn hook_entry(dir: &Option<PathBuf>, statusline: bool) {
     let outcome: Result<()> = (|| {
         let run_id = run_id.ok_or_else(|| Error::usage("DCC_RUN_ID is not set"))?;
         if statusline {
-            return statusline::record(dir, &run_id, &raw);
+            statusline::record(dir, &run_id, &raw)?;
+            let store = Store::open_with_timeout(dir, std::time::Duration::from_millis(1000))?;
+            store.record_usage(&run_id, &raw, now_ms())?;
+            return Ok(());
         }
         let facts = hooks::parse(&raw)?;
         let store = Store::open_with_timeout(dir, std::time::Duration::from_millis(1000))?;
@@ -1205,6 +1231,30 @@ fn main() -> ExitCode {
             };
         }
         Command::Ssh { action } => ssh_cmd(&dir, action),
+        Command::Usage { action } => data_dir(&dir).and_then(|d| {
+            let store = Store::open(&d)?;
+            match action {
+                UsageAction::Show => dcc::usage::show(&store, now_ms()),
+                UsageAction::History {
+                    kind,
+                    window,
+                    hours,
+                    limit,
+                } => {
+                    if kind != "context" && kind != "quota" {
+                        return Err(Error::usage("--kind is context or quota"));
+                    }
+                    let hours = hours.clamp(1, 24 * 30);
+                    dcc::usage::history(
+                        &store,
+                        &kind,
+                        window.as_deref(),
+                        now_ms() - hours * 3600 * 1000,
+                        limit.clamp(1, 2000),
+                    )
+                }
+            }
+        }),
         Command::Config { home, action } => config_cmd(&dir, home, action),
         Command::Secret { action } => secret(action),
         Command::Workspace { action } => workspace(&dir, action),
