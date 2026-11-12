@@ -1,32 +1,69 @@
 # herdr-dcc
 
-Developer Command Center (DCC), Herdr masaüstü uygulamasının içine takılan bir eklenti. Birden çok AI agent'ı, SSH bağlantılarını, Git işlerini ve AI ayarlarını Herdr'ın tek penceresinde toplar. Kendi terminalini veya kendi senkron motorunu yazmaz, Herdr, lazygit, neovim ve Skillshare'i birbirine bağlar.
+**Developer Command Center (DCC)** is an add-on for the [Herdr](https://herdr.dev) desktop terminal app. It puts everything a developer who works with several AI coding agents needs into one window: what each agent is doing, where it works, which servers you are connected to, your Git state and your AI tool configuration.
 
-Durum. Altı ürün fazı kodlandı ve test edildi (aşağıya bakın), ama henüz gerçek bir Herdr kurulumuna yüklenmedi. Tüm denemeler yalıtılmış bir Herdr kopyasında yapıldı. Hedef platform macOS Apple Silicon, Windows bu aşamada kapsam dışı.
+DCC does not replace your tools. It connects the ones that already work well (Herdr, lazygit, neovim, Skillshare, ssh) and adds the missing glue as a small Rust helper (`dcc`) and a set of Herdr panels.
 
-## Parçalar
+> **Status.** Built and tested end to end on a throwaway Herdr copy, not yet installed into a daily-use Herdr. macOS on Apple Silicon is the target. Windows is out of scope for now. This project is independent and is not affiliated with Herdr.
 
-- `crates/dcc` komut satırı programı ve kütüphane (SQLite kaydı, Herdr çağrıları, agent kaydı, SSH, Git, AI konfigürasyonu, kullanım).
-- `crates/dcc-fixture-agent` testler için sahte agent.
-- `crates/xtask` geliştirme ortamı yardımcıları.
-- `mods/` Herdr içinde çalışan paneller (workspaces, agents, ssh, code, config, usage).
-- `layouts/` ve `assets/` Herdr'ın kendi düzenine eklenen DCC düzeni ve simgeler.
-- `docs/` kapasite envanteri, ürün gereksinimleri, mimari, karşılaştırma, yol haritası, doğrulama testleri ve her fazın kaydı (`PROGRESS.md`).
+## What you get
 
-## Fazlar
+| Panel | What it does |
+| --- | --- |
+| **Workspaces** | Save a space (tabs, split panes, folders, startup commands), close it, restore it later, or start one from a template such as the *code* tab (neovim, lazygit, shell). |
+| **Agents** | One row per AI agent session with its state (waiting, running, completed, failed, stopped), branch, worktree, changed files, last hook event and a warning when two agents share one folder. Ended sessions stay in a local history. |
+| **SSH** | Profiles and groups, passwords or key passphrases kept in the macOS Keychain, one-click connect in its own tab, local, remote and dynamic port forwards you can start and stop, saved one-line commands you can send to a terminal. |
+| **Code** | A lazygit popup in the folder of the focused terminal, a one-click code tab, git facts for that folder. Checks that lazygit and neovim are installed and tells you how to install them if not. |
+| **AI config** | A read-only inventory of AI tool files (skills, rules, commands, settings, memory) with paths and sizes only, and a Skillshare sync preview with backup, diff and a separate approval for removals. |
+| **Usage** | Context use and account quota exactly as the agent's own status line reports them, in separate sections. No source means "Unavailable". Nothing is estimated. |
 
-1. Çekirdek (workspace kaydı, Keychain, job deseni, Herdr katmanı)
-2. Agent paneli ve oturum kaydı
-3. SSH (profil, port yönlendirme, kayıtlı komutlar)
-4. Git ve kod sekmesi (lazygit, neovim)
-5. AI konfigürasyonu (envanter, Skillshare önizleme ve senkron)
-6. Kullanım ve kota (yalnızca resmi kaynaktan, tahmin yok)
+The panels open from buttons next to the `+` in the tab bar, one at a time, so terminals keep their space.
 
-Her fazın kabul ölçütleri ve sonucu `docs/05-roadmap.md` ile `docs/PROGRESS.md` içinde.
+## How it fits together
 
-## Derleme ve test
+```mermaid
+flowchart LR
+  subgraph Herdr["Herdr (existing app)"]
+    UI["Window and panels"]
+    Core["herdr-core\n(terminals, agent status)"]
+  end
+  subgraph DCC["DCC"]
+    Mods["Mods (JavaScript panels)"]
+    CLI["dcc helper (Rust)"]
+    DB[("SQLite\nruns, sessions, SSH, usage")]
+  end
+  KC[("macOS Keychain")]
+  Tools["lazygit, neovim,\nssh, Skillshare"]
+  Agents["Claude Code agents"]
 
-Rust'ın güncel kararlı sürümü gerekir.
+  UI --- Mods
+  Mods -->|"exec"| CLI
+  CLI -->|"hc, herdr-app"| Core
+  CLI --- DB
+  CLI --- KC
+  CLI --> Tools
+  Agents -->|"hooks, status line"| CLI
+  Core --- Agents
+```
+
+- Agent state comes from Herdr's own status for each terminal. Hooks and the status line only add ids and extra facts.
+- Agents started by DCC carry their own settings file (`claude --settings`) with hooks that call `dcc`. DCC never writes to `~/.claude`.
+- Anything that can take longer than 30 seconds runs as a detached job you can poll.
+
+## Safety principles
+
+- **Secrets** live only in the Keychain. They never appear in argv, files, logs or screens. There is no `secret get`. A password reaches `ssh` through a private socket and an askpass helper.
+- **Config writes** (for example a Skillshare sync) need a preview you have seen, a backup first, and a separate approval to remove anything.
+- **Numbers are never guessed.** Usage and quota come from the agent's status line or are shown as unavailable.
+- **Read-only where possible.** Git calls disable hooks that a repository could use to run code, and the AI inventory only reads file metadata, never file content.
+
+## Requirements
+
+- macOS on Apple Silicon, [Herdr](https://herdr.dev) (tested with app 0.1.15 and core 0.1.20, pinned in `compat.toml`)
+- Rust (current stable) to build
+- Optional: lazygit, neovim, [Skillshare](https://skillshare.runkids.cc) and Claude Code for the matching features. DCC installs nothing for you and tells you what is missing.
+
+## Build and test
 
 ```sh
 cargo build
@@ -34,26 +71,39 @@ cargo test --workspace
 cargo clippy --all-targets
 ```
 
-Testler gerçek Herdr'a veya gerçek `~/.claude` klasörüne dokunmaz. Bazı testler `skillshare` kuruluysa çalışır, yoksa atlanır.
+Tests never touch a real Herdr or your real `~/.claude`. Tests that need Skillshare are skipped when it is not installed.
 
-## Kullanım
+## Install into Herdr
 
-`dcc` komutu çıktıyı JSON olarak verir. Bir veri klasörü gerekir (`--data-dir` veya `DCC_DATA_DIR`). Yardım için `dcc --help`.
-
-Herdr'a kurulum (üç adım, sırayla) şu komutlarla yapılır, ama bunlar gerçek Herdr ayar klasörüne yazar, önce `docs/PROGRESS.md` içindeki notları okuyun.
+The helper prints JSON for every command (`dcc --help`) and needs a data folder (`--data-dir` or `DCC_DATA_DIR`). These three steps write into Herdr's app home, so read `docs/PROGRESS.md` first. A dry-run and backup wrapper is the next planned step.
 
 ```sh
-dcc herdr ensure-mods
-dcc herdr ensure-tabs
+dcc herdr ensure-mods        # copy the panels
+dcc herdr ensure-tabs        # build the tab bar with the panel buttons
 dcc herdr ensure-layout --recipe layouts/dcc.recipe.json
 ```
 
-## Güvenlik ilkeleri
+The tab bar is derived at install time from the `tabs` mod you already have installed. No Herdr code is shipped in this repository.
 
-- Sırlar yalnızca Keychain'de durur, argv'ye, dosyaya, log'a veya ekrana yazılmaz. `secret get` yoktur.
-- DCC `~/.claude` ayarlarına yazmaz. Yapılandırmaya yazan her eylem yedek, önizleme ve ayrı silme onayı ister.
-- Kullanım ve kota rakamı hiçbir zaman hesaplanmaz veya tahmin edilmez. Resmi kaynak yoksa "Unavailable" yazar.
+## Repository layout
 
-## Lisans
+```
+crates/dcc                 the helper and its library
+crates/dcc-fixture-agent   a fake agent used by tests
+crates/xtask               development environment tasks
+mods/                      Herdr panels (workspaces, agents, ssh, code, config, usage)
+layouts/ assets/ templates/  layout recipe, tab icons, workspace templates
+docs/                      inventory, PRD, architecture, roadmap, validation, progress log
+```
 
-Henüz bir lisans seçilmedi, tüm hakları saklıdır.
+## Roadmap
+
+Phases 1 to 6 are done: core, agent panel and session record, SSH, Git and code tab, AI config, usage and quota. Windows support is a later phase. Each phase's acceptance criteria and results are in `docs/05-roadmap.md` and `docs/PROGRESS.md`, including what is still open.
+
+## Author
+
+Barış Gündüz
+
+## License
+
+No license has been chosen yet, so all rights are reserved.
