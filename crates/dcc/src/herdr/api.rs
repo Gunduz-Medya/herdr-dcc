@@ -50,6 +50,17 @@ pub trait Herdr {
     /// `hc send <terminal> <text>`: pastes the text and presses Enter.
     fn send(&self, terminal: &str, text: &str) -> Result<()>;
     fn kill(&self, terminal: &str) -> Result<()>;
+    /// `hc run --bg --json --name <name> --cwd <cwd> --label k=v ... -- <argv>`. With the labels
+    /// `herdr.space` and `herdr.tab` the terminal joins that tab, and unlike a terminal opened by
+    /// `terminal.open` it keeps its exit code when the program ends (Phase 0 test 4).
+    /// Returns the terminal address.
+    fn run_labeled(
+        &self,
+        name: &str,
+        cwd: &str,
+        labels: &[(String, String)],
+        argv: &[String],
+    ) -> Result<String>;
 }
 
 pub fn is_plain_shell(program: &str) -> bool {
@@ -179,6 +190,35 @@ impl Herdr for CliHerdr {
     }
     fn kill(&self, terminal: &str) -> Result<()> {
         Self::run("hc", &["kill", terminal]).map(|_| ())
+    }
+    fn run_labeled(
+        &self,
+        name: &str,
+        cwd: &str,
+        labels: &[(String, String)],
+        argv: &[String],
+    ) -> Result<String> {
+        let mut args: Vec<String> = vec![
+            "run".into(),
+            "--bg".into(),
+            "--json".into(),
+            "--name".into(),
+            name.into(),
+            "--cwd".into(),
+            cwd.into(),
+        ];
+        for (k, v) in labels {
+            args.push("--label".into());
+            args.push(format!("{k}={v}"));
+        }
+        args.push("--".into());
+        args.extend(argv.iter().cloned());
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let v = Self::run_json("hc", &refs)?;
+        v.get("address")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| Error::external("hc run answered without an address"))
     }
 }
 

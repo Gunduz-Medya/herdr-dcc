@@ -37,6 +37,32 @@ pub fn create_private_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// A random (version 4) uuid. The bytes come from the random keys the standard library hashes with
+/// (a fresh `RandomState` per call), mixed with the clock and the process id. Good enough to name
+/// runs and sessions, not for secrets.
+pub fn new_uuid() -> String {
+    use std::hash::{BuildHasher, Hasher, RandomState};
+    let mut bytes = [0u8; 16];
+    for (i, chunk) in bytes.chunks_mut(8).enumerate() {
+        let mut h = RandomState::new().build_hasher();
+        h.write_i64(now_ms());
+        h.write_u32(std::process::id());
+        h.write_usize(i);
+        chunk.copy_from_slice(&h.finish().to_be_bytes());
+    }
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: Vec<String> = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        hex[0..4].concat(),
+        hex[4..6].concat(),
+        hex[6..8].concat(),
+        hex[8..10].concat(),
+        hex[10..16].concat()
+    )
+}
+
 /// Is a process with this id alive. Unix only for now, Windows is untested and says so.
 pub fn process_alive(pid: u32) -> Result<bool> {
     #[cfg(unix)]
@@ -70,6 +96,33 @@ pub fn scratch_dir(tag: &str) -> std::path::PathBuf {
     dir
 }
 
+/// Runs git in `dir` with a fixed identity, for tests. Panics when git fails.
+pub fn sh(dir: &Path, args: &[&str]) -> String {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
+        .args(args)
+        .output()
+        .expect("cannot run git");
+    assert!(
+        out.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// A scratch git repository on `main` with one commit, for tests.
+pub fn scratch_repo(tag: &str) -> std::path::PathBuf {
+    let d = scratch_dir(tag);
+    sh(&d, &["init", "-q", "-b", "main"]);
+    fs::write(d.join("README.md"), "x\n").expect("write");
+    sh(&d, &["add", "README.md"]);
+    sh(&d, &["commit", "-q", "-m", "init"]);
+    d
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,6 +132,16 @@ mod tests {
         assert_eq!(fnv1a_hex(b""), "cbf29ce484222325");
         assert_eq!(fnv1a_hex(b"a"), "af63dc4c8601ec8c");
         assert_ne!(fnv1a_hex(b"ab"), fnv1a_hex(b"ba"));
+    }
+
+    #[test]
+    fn uuids_look_right_and_differ() {
+        let a = new_uuid();
+        let b = new_uuid();
+        assert_ne!(a, b);
+        assert_eq!(a.len(), 36);
+        assert_eq!(a.as_bytes()[14], b'4');
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit() || c == '-'));
     }
 
     #[test]

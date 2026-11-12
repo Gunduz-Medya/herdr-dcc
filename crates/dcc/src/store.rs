@@ -36,6 +36,56 @@ const MIGRATIONS: &[&str] = &[
         value      TEXT NOT NULL,
         updated_ms INTEGER NOT NULL
      );",
+    // 2, agent runs (a process in a terminal), their sessions and their events
+    "CREATE TABLE agent_runs (
+        id                  TEXT PRIMARY KEY,
+        agent_kind          TEXT NOT NULL,
+        launch_mode         TEXT NOT NULL,
+        launch_session_id   TEXT,
+        started_ms          INTEGER NOT NULL,
+        ended_ms            INTEGER,
+        last_state          TEXT NOT NULL,
+        last_state_ms       INTEGER NOT NULL,
+        herdr_status        TEXT,
+        end_reason          TEXT,
+        exit_code           INTEGER,
+        cwd                 TEXT,
+        repo_root           TEXT,
+        branch              TEXT,
+        worktree_kind       TEXT,
+        worktree_path       TEXT,
+        changed_files       INTEGER,
+        staged              INTEGER,
+        unstaged            INTEGER,
+        untracked           INTEGER,
+        herdr_session       TEXT,
+        terminal_addr       TEXT,
+        terminal_created_ms INTEGER,
+        pane_id             TEXT,
+        space_name          TEXT,
+        tab_name            TEXT
+     );
+     CREATE INDEX agent_runs_open ON agent_runs (ended_ms, last_state_ms);
+     CREATE TABLE agent_sessions (
+        id          TEXT PRIMARY KEY,
+        run_id      TEXT NOT NULL REFERENCES agent_runs(id),
+        id_source   TEXT NOT NULL,
+        started_ms  INTEGER NOT NULL,
+        ended_ms    INTEGER,
+        end_source  TEXT
+     );
+     CREATE INDEX agent_sessions_run ON agent_sessions (run_id, started_ms);
+     CREATE TABLE agent_events (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id            TEXT NOT NULL REFERENCES agent_runs(id),
+        session_id        TEXT,
+        ts_ms             INTEGER NOT NULL,
+        kind              TEXT NOT NULL,
+        state             TEXT,
+        tool_name         TEXT,
+        notification_type TEXT
+     );
+     CREATE INDEX agent_events_run ON agent_events (run_id, ts_ms);",
 ];
 
 pub struct Store {
@@ -54,21 +104,26 @@ pub struct WorkspaceRow {
 impl Store {
     /// Opens (and creates) `<data_dir>/dcc.sqlite` and brings it to the latest schema.
     pub fn open(data_dir: &Path) -> Result<Self> {
+        Self::open_with_timeout(data_dir, BUSY_TIMEOUT)
+    }
+
+    /// Same, with a shorter wait for a busy file. A hook uses this so it can never hold an agent up.
+    pub fn open_with_timeout(data_dir: &Path, busy: Duration) -> Result<Self> {
         create_private_dir(data_dir)?;
         let conn = Connection::open(Self::file(data_dir))?;
-        Self::init(conn)
+        Self::init(conn, busy)
     }
 
     pub fn open_in_memory() -> Result<Self> {
-        Self::init(Connection::open_in_memory()?)
+        Self::init(Connection::open_in_memory()?, BUSY_TIMEOUT)
     }
 
     pub fn file(data_dir: &Path) -> PathBuf {
         data_dir.join("dcc.sqlite")
     }
 
-    fn init(conn: Connection) -> Result<Self> {
-        conn.busy_timeout(BUSY_TIMEOUT)?;
+    fn init(conn: Connection, busy: Duration) -> Result<Self> {
+        conn.busy_timeout(busy)?;
         conn.query_row("PRAGMA journal_mode=WAL", [], |r| r.get::<_, String>(0))?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
         let store = Self { conn };
@@ -223,7 +278,14 @@ mod tests {
         assert_eq!(s.schema_version().unwrap(), Store::latest_version());
         assert_eq!(
             tables(&s),
-            vec!["contract_runs", "herdr_state", "workspaces"]
+            vec![
+                "agent_events",
+                "agent_runs",
+                "agent_sessions",
+                "contract_runs",
+                "herdr_state",
+                "workspaces"
+            ]
         );
     }
 

@@ -11,6 +11,9 @@ use serde_json::{Value, json};
 use super::api::{Herdr, SpaceInfo, TabInfo, TermRef, TerminalInfo};
 use crate::error::{Error, Result};
 
+/// A `run_labeled` call: name, argv and labels.
+pub type Launched = (String, Vec<String>, Vec<(String, String)>);
+
 #[derive(Debug, Clone)]
 enum FNode {
     Leaf(String),
@@ -54,6 +57,7 @@ struct State {
     typed: Vec<(String, String)>,
     killed: Vec<String>,
     close_kills_terminals: bool,
+    launched: Vec<Launched>,
 }
 
 pub struct FakeHerdr {
@@ -119,6 +123,22 @@ impl State {
         }
     }
 
+    /// Removes a leaf, the sibling takes its place. False when the pane is the only one of its tab.
+    fn remove_leaf(node: &mut FNode, target: &str) -> bool {
+        if let FNode::Split { first, second, .. } = node {
+            if matches!(&**first, FNode::Leaf(p) if p == target) {
+                *node = (**second).clone();
+                return true;
+            }
+            if matches!(&**second, FNode::Leaf(p) if p == target) {
+                *node = (**first).clone();
+                return true;
+            }
+            return Self::remove_leaf(first, target) || Self::remove_leaf(second, target);
+        }
+        false
+    }
+
     fn render(&self, node: &FNode) -> String {
         match node {
             FNode::Leaf(p) => {
@@ -165,6 +185,11 @@ impl FakeHerdr {
         let s = self.s.borrow();
         let sp = s.spaces.iter().find(|x| x.name == space)?;
         Some(s.render(&sp.tabs.get(tab_index)?.tree))
+    }
+
+    /// What `run_labeled` was asked to start: name, argv and labels.
+    pub fn launched(&self) -> Vec<Launched> {
+        self.s.borrow().launched.clone()
     }
 
     pub fn typed(&self) -> Vec<(String, String)> {
@@ -334,6 +359,31 @@ impl Herdr for FakeHerdr {
                 s.focus = Some(pane.clone());
                 Ok(json!({"pane": pane, "terminal": term}))
             }
+            "pane.close" => {
+                let pane = arg(&args, "pane")
+                    .ok_or_else(|| Error::usage("pane.close needs a pane"))?
+                    .to_string();
+                let term = s
+                    .pane_term
+                    .get(&pane)
+                    .cloned()
+                    .ok_or_else(|| Error::not_found("no such pane"))?;
+                let mut removed = false;
+                for sp in &mut s.spaces {
+                    for tab in &mut sp.tabs {
+                        removed = removed || State::remove_leaf(&mut tab.tree, &pane);
+                    }
+                }
+                if !removed {
+                    return Err(Error::conflict(
+                        "the last pane of a tab is not closed by the fake",
+                    ));
+                }
+                if let Some(t) = s.terms.get_mut(&term) {
+                    t.live = false;
+                }
+                Ok(json!({"ok": true}))
+            }
             "space.close" => {
                 let id = arg(&args, "id")
                     .ok_or_else(|| Error::usage("space.close needs an id"))?
@@ -369,6 +419,42 @@ impl Herdr for FakeHerdr {
         }
         s.typed.push((terminal.to_string(), text.to_string()));
         Ok(())
+    }
+
+    fn run_labeled(
+        &self,
+        name: &str,
+        cwd: &str,
+        labels: &[(String, String)],
+        argv: &[String],
+    ) -> Result<String> {
+        let mut s = self.s.borrow_mut();
+        s.launched
+            .push((name.to_string(), argv.to_vec(), labels.to_vec()));
+        let program = argv
+            .first()
+            .map(|a| a.rsplit('/').next().unwrap_or(a).to_string())
+            .unwrap_or_default();
+        let (term, pane) = s.new_terminal(cwd, &program);
+        let tab_id = labels
+            .iter()
+            .find(|(k, _)| k == "herdr.tab")
+            .map(|(_, v)| v.clone());
+        if let Some(tab_id) = tab_id {
+            for sp in &mut s.spaces {
+                for tab in &mut sp.tabs {
+                    if tab.id == tab_id {
+                        let old = tab.tree.clone();
+                        tab.tree = FNode::Split {
+                            dir: "right".into(),
+                            first: Box::new(old),
+                            second: Box::new(FNode::Leaf(pane.clone())),
+                        };
+                    }
+                }
+            }
+        }
+        Ok(term)
     }
 
     fn kill(&self, terminal: &str) -> Result<()> {

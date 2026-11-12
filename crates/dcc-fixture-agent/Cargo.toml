@@ -1,0 +1,10 @@
+[package]
+name = "dcc-fixture-agent"
+description = "A pretend agent that reports its state over OSC 7501, for the contract test"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

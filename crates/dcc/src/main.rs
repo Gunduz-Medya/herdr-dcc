@@ -1,17 +1,21 @@
 //! The `dcc` command line. Every command prints one JSON document. Errors go to stderr as
 //! `{"error":{"kind","message"}}` with a non zero exit code (2 usage, 3 not found, 1 the rest).
 
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Read};
 use std::path::PathBuf;
 use std::process::{Command as Proc, ExitCode};
 
 use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 
+use dcc::agent::launch::{LaunchParams, WorktreeMode};
+use dcc::agent::record::{CliSource, RecordOptions};
+use dcc::agent::{contract, exec, hooks, launch, record, statusline};
 use dcc::herdr::api::{CliHerdr, Herdr};
 use dcc::herdr::{compat, core, isolation, layout, mods};
 use dcc::secret::{KeyringBackend, SERVICE, SecretBackend, set_with};
 use dcc::store::Store;
+use dcc::util::now_ms;
 use dcc::workspace::{ops, templates};
 use dcc::{Error, Result, jobs};
 
@@ -46,6 +50,21 @@ enum Command {
     Herdr {
         #[command(subcommand)]
         action: HerdrAction,
+    },
+    /// Agents: start them, record their hooks, show their runs.
+    Agent {
+        #[command(subcommand)]
+        action: AgentAction,
+    },
+    /// Read only git facts and worktrees.
+    Git {
+        #[command(subcommand)]
+        action: GitAction,
+    },
+    /// Checks of the Herdr side that DCC depends on.
+    Diag {
+        #[command(subcommand)]
+        action: DiagAction,
     },
     #[command(hide = true)]
     Debug {
@@ -169,6 +188,98 @@ enum CoreAction {
     VerifyClosed {
         #[arg(required = true)]
         pids: Vec<u32>,
+    },
+}
+
+#[derive(Subcommand)]
+enum AgentAction {
+    /// Read a Claude Code hook event on stdin and record ids and names only. Always exits 0.
+    HookLog,
+    /// Read the status line JSON on stdin, keep key names and types only, print one word.
+    StatuslineLog,
+    /// Start a program in a clean environment with DCC_RUN_ID set. The program replaces dcc.
+    Exec {
+        #[arg(long)]
+        run_id: String,
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
+    /// Start a Claude Code agent: own worktree, settings file, labeled terminal, records.
+    Launch {
+        #[arg(long)]
+        repo: PathBuf,
+        /// auto (a new worktree and branch for this agent) or off (the repository folder).
+        #[arg(long, default_value = "auto")]
+        worktree: String,
+        #[arg(long)]
+        branch: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        permission_mode: Option<String>,
+        /// Space for the agent's tab, made when it does not exist.
+        #[arg(long, default_value = "agents")]
+        space: String,
+        /// The agent program. Found on PATH when not given.
+        #[arg(long)]
+        program: Option<PathBuf>,
+        #[arg(last = true)]
+        extra: Vec<String>,
+    },
+    /// Update the records from the core and print the runs (open ones and recently ended ones).
+    Snapshot {
+        /// Show the result without writing it to the database.
+        #[arg(long)]
+        no_write: bool,
+        /// How many ended runs to include.
+        #[arg(long, default_value_t = 8)]
+        closed: i64,
+    },
+}
+
+#[derive(Subcommand)]
+enum GitAction {
+    /// Branch, worktree kind and change counts of a folder.
+    Info { dir: PathBuf },
+    Worktree {
+        #[command(subcommand)]
+        action: WorktreeAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum WorktreeAction {
+    Add {
+        repo: PathBuf,
+        #[arg(long)]
+        branch: String,
+        path: PathBuf,
+    },
+    List {
+        repo: PathBuf,
+    },
+    /// Remove a linked worktree. Needs --confirm. Git refuses one with changes.
+    Remove {
+        repo: PathBuf,
+        path: PathBuf,
+        #[arg(long)]
+        confirm: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum DiagAction {
+    /// The OSC 7501 contract test: a fixture agent reports its states and the core must show them.
+    Contract {
+        /// ok, or broken (a fixture whose reports are invalid, the test must fail).
+        #[arg(long, default_value = "ok")]
+        mode: String,
+        #[arg(long)]
+        fixture: Option<PathBuf>,
+        #[arg(long, default_value_t = 1200)]
+        step_ms: u64,
+        #[arg(long, default_value_t = 25)]
+        timeout_secs: u64,
     },
 }
 
@@ -385,6 +496,169 @@ fn herdr_cmd(dir: &Option<PathBuf>, action: HerdrAction) -> Result<Value> {
     }
 }
 
+/// A hook must never fail or slow an agent down. Everything is swallowed, errors are noted by kind only.
+fn hook_entry(dir: &Option<PathBuf>, statusline: bool) {
+    let mut raw = String::new();
+    let _ = std::io::stdin().take(1024 * 1024).read_to_string(&mut raw);
+    let Some(dir) = dir else { return };
+    let run_id = std::env::var("DCC_RUN_ID")
+        .ok()
+        .filter(|r| hooks::valid_session_id(r));
+    let outcome: Result<()> = (|| {
+        let run_id = run_id.ok_or_else(|| Error::usage("DCC_RUN_ID is not set"))?;
+        if statusline {
+            return statusline::record(dir, &run_id, &raw);
+        }
+        let facts = hooks::parse(&raw)?;
+        let store = Store::open_with_timeout(dir, std::time::Duration::from_millis(1000))?;
+        hooks::record(&store, &run_id, &facts, now_ms())
+    })();
+    if let Err(e) = outcome {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("hook-errors.log"))
+        {
+            let _ = writeln!(f, "{} {}", now_ms(), e.kind);
+        }
+    }
+}
+
+fn agent_cmd(dir: &Option<PathBuf>, action: AgentAction) -> Result<Value> {
+    match action {
+        AgentAction::HookLog | AgentAction::StatuslineLog => unreachable!("handled in main"),
+        AgentAction::Exec { run_id, command } => {
+            let (program, args) = command
+                .split_first()
+                .ok_or_else(|| Error::usage("nothing to run"))?;
+            let code = exec::run(&run_id, program, args)?;
+            std::process::exit(code);
+        }
+        AgentAction::Launch {
+            repo,
+            worktree,
+            branch,
+            model,
+            permission_mode,
+            space,
+            program,
+            extra,
+        } => {
+            let worktree = match worktree.as_str() {
+                "auto" => WorktreeMode::Auto,
+                "off" => WorktreeMode::Off,
+                other => {
+                    return Err(Error::usage(format!(
+                        "--worktree is auto or off, not {other}"
+                    )));
+                }
+            };
+            let data_dir = data_dir(dir)?;
+            let store = Store::open(&data_dir)?;
+            let params = LaunchParams {
+                repo: repo.canonicalize().unwrap_or(repo),
+                worktree,
+                branch,
+                model,
+                permission_mode,
+                extra_args: extra,
+                space,
+                program,
+                dcc_exe: std::env::current_exe()?,
+                data_dir: data_dir.canonicalize().unwrap_or(data_dir),
+                herdr_session: isolation::current().session,
+            };
+            launch::launch(&store, &CliHerdr::new()?, &params, now_ms())
+        }
+        AgentAction::Snapshot { no_write, closed } => {
+            isolation::require()?;
+            let store = Store::open(&data_dir(dir)?)?;
+            let opts = RecordOptions {
+                write: !no_write,
+                now_ms: now_ms(),
+                closed_limit: closed,
+                herdr_session: isolation::current().session,
+            };
+            record::snapshot(&store, &CliSource, &opts)
+        }
+    }
+}
+
+fn git_cmd(action: GitAction) -> Result<Value> {
+    match action {
+        GitAction::Info { dir } => Ok(dcc::git::info(&dir.to_string_lossy())
+            .map(|g| g.to_json())
+            .unwrap_or_else(|| json!({ "ok": false }))),
+        GitAction::Worktree { action } => match action {
+            WorktreeAction::Add { repo, branch, path } => {
+                dcc::git::worktree_add(&repo.to_string_lossy(), &branch, &path)?;
+                Ok(json!({ "added": path.to_string_lossy(), "branch": branch }))
+            }
+            WorktreeAction::List { repo } => Ok(
+                json!({ "worktrees": dcc::git::worktree_list(&repo.to_string_lossy())?.into_iter().map(|(p, b)| json!({ "path": p, "branch": b })).collect::<Vec<_>>() }),
+            ),
+            WorktreeAction::Remove {
+                repo,
+                path,
+                confirm,
+            } => {
+                dcc::git::worktree_remove(
+                    &repo.to_string_lossy(),
+                    &path.to_string_lossy(),
+                    confirm,
+                )?;
+                Ok(json!({ "removed": path.to_string_lossy() }))
+            }
+        },
+    }
+}
+
+fn diag_cmd(dir: &Option<PathBuf>, action: DiagAction) -> Result<Value> {
+    let DiagAction::Contract {
+        mode,
+        fixture,
+        step_ms,
+        timeout_secs,
+    } = action;
+    let herdr = CliHerdr::new()?;
+    let fixture = match fixture {
+        Some(f) => f,
+        None => std::env::current_exe()?.with_file_name(if cfg!(windows) {
+            "dcc-fixture-agent.exe"
+        } else {
+            "dcc-fixture-agent"
+        }),
+    };
+    if !fixture.exists() {
+        return Err(Error::not_found(format!(
+            "fixture agent not found at {}, run cargo build first",
+            fixture.display()
+        )));
+    }
+    let probe = contract::CliProbe { herdr: &herdr };
+    let report = contract::run(
+        &probe,
+        &fixture,
+        &mode,
+        step_ms,
+        std::time::Duration::from_secs(timeout_secs),
+        std::time::Duration::from_millis(150),
+    )?;
+    let (app, core) = (
+        compat::program_version("herdr-app")?,
+        compat::program_version("hc")?,
+    );
+    let store = Store::open(&data_dir(dir)?)?;
+    let id = contract::record(&store, &report, &app, &core)?;
+    let doc = json!({ "mode": mode, "recorded_run": id, "herdr_app": app, "herdr_core": core, "result": report.to_json() });
+    if report.passed {
+        Ok(doc)
+    } else {
+        Err(Error::new("contract", doc.to_string()))
+    }
+}
+
 fn main() -> ExitCode {
     let Cli {
         data_dir: dir,
@@ -415,6 +689,22 @@ fn main() -> ExitCode {
             JobAction::Run { .. } => Err(Error::usage("job run is internal")),
         }),
         Command::Herdr { action } => herdr_cmd(&dir, action),
+        Command::Agent {
+            action: AgentAction::HookLog,
+        } => {
+            hook_entry(&dir, false);
+            return ExitCode::SUCCESS;
+        }
+        Command::Agent {
+            action: AgentAction::StatuslineLog,
+        } => {
+            hook_entry(&dir, true);
+            println!("dcc");
+            return ExitCode::SUCCESS;
+        }
+        Command::Agent { action } => agent_cmd(&dir, action),
+        Command::Git { action } => git_cmd(action),
+        Command::Diag { action } => diag_cmd(&dir, action),
     };
     emit(result)
 }
