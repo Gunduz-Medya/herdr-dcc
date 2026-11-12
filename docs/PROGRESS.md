@@ -165,5 +165,5 @@ Kullanıcı dört panelin terminali kapattığını söyledi ve panellerin sağ 
   - Panel düğmelerine (Preview, Apply) gerçek fare tıklaması yapılmadı, aynı komutlar CLI'dan denendi. Panelin önizleme görünümü görülmedi.
   - Skillshare yalnızca skills için önizleniyor ve senkronlanıyor (agents, extras, MCP, hooks, plugins senkronu bu fazda yok). Envanter Claude Code'un MCP ve hook ayarlarının içine bakmıyor (içerik okunmadığı için), yalnızca dosya olarak görünüyor.
   - Skillshare'in yedek geri yükleme akışı DCC'den çağrılmıyor, ekranda `skillshare restore` yazıyor.
-  - Skillshare 0.30.2 ile denendi. Çıktı biçimi değişirse önizleme hata verir (JSON yoksa reddeder), sessizce yanlış sonuç vermez.
+  - Skillshare 0.30.2 ile denendi. Çıktı biçimi değişirse önizleme hata verir (JSON yoksa reddeder), yanlış sonuç vermez.
   - Gerçek kullanıcı ev klasöründe `apply` hiç çalıştırılmadı (kural gereği). Yalnızca gerçek Skillshare ile sahte ev klasöründe.
