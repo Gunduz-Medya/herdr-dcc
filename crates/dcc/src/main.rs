@@ -389,6 +389,9 @@ enum AgentAction {
 enum GitAction {
     /// Branch, worktree kind and change counts of a folder.
     Info { dir: PathBuf },
+    /// Whether lazygit and neovim are installed, with the command that installs a missing one.
+    /// dcc installs nothing.
+    Tools,
     Worktree {
         #[command(subcommand)]
         action: WorktreeAction,
@@ -959,6 +962,13 @@ fn git_cmd(action: GitAction) -> Result<Value> {
         GitAction::Info { dir } => Ok(dcc::git::info(&dir.to_string_lossy())
             .map(|g| g.to_json())
             .unwrap_or_else(|| json!({ "ok": false }))),
+        GitAction::Tools => {
+            let rows: Vec<Value> = dcc::git::tools()
+                .iter()
+                .map(|t| json!({ "name": t.name, "path": t.path.as_ref().map(|p| p.to_string_lossy().to_string()), "install": t.install }))
+                .collect();
+            Ok(json!({ "tools": rows }))
+        }
         GitAction::Worktree { action } => match action {
             WorktreeAction::Add { repo, branch, path } => {
                 dcc::git::worktree_add(&repo.to_string_lossy(), &branch, &path)?;

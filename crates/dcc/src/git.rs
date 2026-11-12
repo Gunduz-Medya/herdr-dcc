@@ -4,7 +4,7 @@
 
 use std::fs;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -228,6 +228,49 @@ fn run_git(cwd: &str, args: &[&str]) -> Result<String> {
 }
 
 /// A branch name made of safe characters only.
+/// A program the code tab needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tool {
+    pub name: &'static str,
+    pub path: Option<PathBuf>,
+    pub install: &'static str,
+}
+
+fn find_in(path: &std::ffi::OsStr, name: &str) -> Option<PathBuf> {
+    std::env::split_paths(path)
+        .map(|d| d.join(name))
+        .find(|p| p.is_file())
+}
+
+/// Looks for neovim and lazygit in `path`. dcc never installs them, the hint is only shown.
+pub fn tools_in(path: &std::ffi::OsStr) -> Vec<Tool> {
+    let mac = cfg!(target_os = "macos");
+    vec![
+        Tool {
+            name: "nvim",
+            path: find_in(path, "nvim"),
+            install: if mac {
+                "brew install neovim"
+            } else {
+                "see https://neovim.io/doc/install/"
+            },
+        },
+        Tool {
+            name: "lazygit",
+            path: find_in(path, "lazygit"),
+            install: if mac {
+                "brew install lazygit"
+            } else {
+                "see https://github.com/jesseduffield/lazygit#installation"
+            },
+        },
+    ]
+}
+
+pub fn tools() -> Vec<Tool> {
+    tools_in(&std::env::var_os("PATH").unwrap_or_default())
+}
+
 pub fn valid_branch(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 100
@@ -499,6 +542,17 @@ mod tests {
             o.contains(&"filter.one.clean=".to_string())
                 && o.contains(&"filter.two.dotted.name.process=".to_string())
         );
+    }
+
+    #[test]
+    fn tools_are_found_on_the_given_path_and_missing_ones_come_with_an_install_hint() {
+        let d = crate::util::scratch_dir("git-tools");
+        fs::write(d.join("lazygit"), "#!/bin/sh\n").unwrap();
+        let t = tools_in(d.as_os_str());
+        let lazygit = t.iter().find(|x| x.name == "lazygit").unwrap();
+        let nvim = t.iter().find(|x| x.name == "nvim").unwrap();
+        assert_eq!(lazygit.path.as_deref(), Some(d.join("lazygit").as_path()));
+        assert!(nvim.path.is_none() && !nvim.install.is_empty());
     }
 
     #[test]
