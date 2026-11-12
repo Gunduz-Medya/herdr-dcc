@@ -184,8 +184,11 @@ fn the_status_line_draws_the_reported_values_and_keeps_keys_not_values() {
     let json = r#"{"model":{"id":"VALUE-MODEL","display_name":"x"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":1}}}"#;
     let o = run_dcc(&data, &["agent", "statusline-log"], json, Some(RUN));
     assert_eq!(
-        (o.status.code(), String::from_utf8_lossy(&o.stdout).trim()),
-        (Some(0), "x | ctx 8% | 5h 1% | 7d ?")
+        (
+            o.status.code(),
+            strip(String::from_utf8_lossy(&o.stdout).trim())
+        ),
+        (Some(0), "x | ctx 8% | 5h 1% | 7d ?".to_string())
     );
     let text = std::fs::read_to_string(data.join("agents").join(RUN).join("statusline-keys.json"))
         .unwrap();
@@ -201,8 +204,11 @@ fn the_status_line_draws_the_reported_values_and_keeps_keys_not_values() {
     ] {
         let o = run_dcc(&data, &["agent", "statusline-log"], stdin, run);
         assert_eq!(
-            (o.status.code(), String::from_utf8_lossy(&o.stdout).trim()),
-            (Some(0), want)
+            (
+                o.status.code(),
+                strip(String::from_utf8_lossy(&o.stdout).trim())
+            ),
+            (Some(0), want.to_string())
         );
     }
 }
@@ -303,4 +309,22 @@ fn git_worktree_commands_need_the_confirmation_to_remove() {
     ]);
     assert!(done.status.success());
     assert!(!wt.exists());
+}
+
+/// The status line output without its colour codes.
+fn strip(s: &str) -> String {
+    let mut out = String::new();
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            for n in chars.by_ref() {
+                if n == 'm' {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }

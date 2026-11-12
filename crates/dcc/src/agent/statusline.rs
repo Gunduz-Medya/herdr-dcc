@@ -14,6 +14,14 @@ use crate::util::{create_private_dir, now_ms};
 
 const MAX_DEPTH: usize = 8;
 
+const RESET: &str = "\x1b[0m";
+const DIM: &str = "\x1b[90m";
+const BLUE: &str = "\x1b[34m";
+const WHITE: &str = "\x1b[97m";
+const GREEN: &str = "\x1b[32m";
+const YELLOW: &str = "\x1b[33m";
+const RED: &str = "\x1b[31m";
+
 /// A percentage as the agent reported it, written the way the number is (12.5 stays 12.5), or
 /// `?` when the field is missing or null. Nothing is rounded or computed.
 fn shown(v: Option<&Value>) -> String {
@@ -23,11 +31,31 @@ fn shown(v: Option<&Value>) -> String {
     }
 }
 
+/// Only a colour for the number the agent reported: green below 50, yellow below 80, red from
+/// 80 on, grey when there is no number. The thresholds are a display choice, nothing is derived.
+fn level_colour(v: Option<&Value>) -> &'static str {
+    match v.and_then(Value::as_f64) {
+        Some(x) if x.is_finite() && x < 50.0 => GREEN,
+        Some(x) if x.is_finite() && x < 80.0 => YELLOW,
+        Some(x) if x.is_finite() => RED,
+        _ => DIM,
+    }
+}
+
 /// The text the status line shows in the agent's own bar. DCC replaces the user's status line
 /// command for the sessions it starts (that is how it receives the numbers), so it draws the same
 /// facts itself: folder, model, context and the two quota windows, each exactly as reported.
 /// A document that cannot be read gives `dcc`.
 pub fn display_line(raw: &str) -> String {
+    render(raw, true)
+}
+
+/// The same line without colour codes.
+pub fn plain_line(raw: &str) -> String {
+    render(raw, false)
+}
+
+fn render(raw: &str, colour: bool) -> String {
     let Ok(doc) = serde_json::from_str::<Value>(raw) else {
         return "dcc".to_string();
     };
@@ -55,17 +83,29 @@ pub fn display_line(raw: &str) -> String {
     let ctx = doc
         .get("context_window")
         .and_then(|v| v.get("used_percentage"));
+    let paint = |code: &str, t: String| {
+        if colour {
+            format!("{code}{t}{RESET}")
+        } else {
+            t
+        }
+    };
     let mut parts: Vec<String> = Vec::new();
     if let Some(d) = dir {
-        parts.push(d);
+        parts.push(paint(BLUE, d));
     }
     if let Some(m) = text(&["model", "display_name"]) {
-        parts.push(m);
+        parts.push(paint(WHITE, m));
     }
-    parts.push(format!("ctx {}", shown(ctx)));
-    parts.push(format!("5h {}", shown(get("rate_limits", "five_hour"))));
-    parts.push(format!("7d {}", shown(get("rate_limits", "seven_day"))));
-    parts.join(" | ")
+    for (label, v) in [
+        ("ctx", ctx),
+        ("5h", get("rate_limits", "five_hour")),
+        ("7d", get("rate_limits", "seven_day")),
+    ] {
+        let value = paint(level_colour(v), shown(v));
+        parts.push(format!("{} {value}", paint(DIM, label.to_string())));
+    }
+    parts.join(&paint(DIM, " | ".to_string()))
 }
 
 fn type_name(v: &Value) -> &'static str {
@@ -185,18 +225,59 @@ mod tests {
         let doc = r#"{"workspace":{"current_dir":"/tmp/project"},"model":{"display_name":"Sonnet 5.5"},
             "context_window":{"used_percentage":46},"rate_limits":{"five_hour":{"used_percentage":82.5},"seven_day":{"used_percentage":null}}}"#;
         assert_eq!(
-            display_line(doc),
+            plain_line(doc),
             "/tmp/project | Sonnet 5.5 | ctx 46% | 5h 82.5% | 7d ?"
         );
+        // the coloured line is the same text with colour codes around the parts
+        let coloured = display_line(doc);
+        assert_eq!(strip_ansi(&coloured), plain_line(doc));
+        assert!(coloured.contains("\x1b[32m46%"), "46 is below 50, green");
+        assert!(
+            coloured.contains("\x1b[31m82.5%"),
+            "82.5 is from 80 on, red"
+        );
+        assert!(coloured.contains("\x1b[90m?"), "no number is grey");
+    }
+
+    fn strip_ansi(s: &str) -> String {
+        let mut out = String::new();
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                for n in chars.by_ref() {
+                    if n == 'm' {
+                        break;
+                    }
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn colour_follows_the_reported_number_only() {
+        for (n, code) in [
+            ("0", GREEN),
+            ("49.9", GREEN),
+            ("50", YELLOW),
+            ("79", YELLOW),
+            ("80", RED),
+            ("100", RED),
+        ] {
+            let doc = format!(r#"{{"context_window":{{"used_percentage":{n}}}}}"#);
+            assert!(display_line(&doc).contains(&format!("{code}{n}%")), "{n}");
+        }
     }
 
     #[test]
     fn missing_fields_show_a_question_mark_and_bad_input_shows_dcc() {
-        assert_eq!(display_line("{}"), "ctx ? | 5h ? | 7d ?");
+        assert_eq!(plain_line("{}"), "ctx ? | 5h ? | 7d ?");
         assert_eq!(display_line("not json"), "dcc");
         assert_eq!(display_line(""), "dcc");
         // a non number is not shown as a number
-        assert!(display_line(r#"{"context_window":{"used_percentage":"46"}}"#).contains("ctx ?"));
+        assert!(plain_line(r#"{"context_window":{"used_percentage":"46"}}"#).contains("ctx ?"));
     }
 
     #[test]

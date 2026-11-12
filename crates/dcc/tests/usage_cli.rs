@@ -60,7 +60,7 @@ fn the_status_line_command_stores_reported_values_and_the_panel_data_keeps_the_p
     let o = statusline(&data, "abcdef12-aaaa", doc);
     assert!(o.status.success());
     assert_eq!(
-        String::from_utf8_lossy(&o.stdout).trim(),
+        strip(String::from_utf8_lossy(&o.stdout).trim()),
         "ctx ? | 5h 12.5% | 7d ?"
     );
 
@@ -183,4 +183,22 @@ fn the_usage_code_reads_only_the_reported_percentage_and_reset_time() {
             "usage.rs must not compute with a percentage ({op})"
         );
     }
+}
+
+/// The status line output without its colour codes.
+fn strip(s: &str) -> String {
+    let mut out = String::new();
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            for n in chars.by_ref() {
+                if n == 'm' {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
