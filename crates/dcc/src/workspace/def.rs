@@ -94,6 +94,18 @@ impl Node {
         walk(self, &mut n, command)
     }
 
+    /// The startup command of every pane, in tree order, for code that sets them.
+    pub fn startups_mut(&mut self) -> Vec<&mut Option<String>> {
+        match self {
+            Node::Pane { startup, .. } => vec![startup],
+            Node::Split { first, second, .. } => {
+                let mut v = first.startups_mut();
+                v.extend(second.startups_mut());
+                v
+            }
+        }
+    }
+
     pub fn replace_cwd(&mut self, from: &str, to: &str) {
         match self {
             Node::Pane { cwd, .. } => *cwd = cwd.replace(from, to),

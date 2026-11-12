@@ -59,6 +59,11 @@ enum Command {
         #[command(subcommand)]
         action: AgentAction,
     },
+    /// Neovim of a code tab.
+    Code {
+        #[command(subcommand)]
+        action: CodeAction,
+    },
     /// Context use and account quota as the agent's status line reported them.
     Usage {
         #[command(subcommand)]
@@ -91,6 +96,16 @@ enum Command {
     Debug {
         #[command(subcommand)]
         action: DebugAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum CodeAction {
+    /// Open files in the neovim of this code tab (needs DCC_NVIM_SOCKET, the shell pane of a
+    /// code tab sets it and defines `e` for this command).
+    Edit {
+        #[arg(required = true)]
+        files: Vec<String>,
     },
 }
 
@@ -905,7 +920,13 @@ fn workspace(dir: &Option<PathBuf>, action: WorkspaceAction) -> Result<Value> {
                     folder,
                 },
         } => {
-            let def = templates::instantiate(&template, &name, &folder)?;
+            let data = abs_data_dir(dir)?;
+            dcc::util::create_private_dir(&data.join("nvim"))?;
+            let link = templates::EditorLink {
+                socket: templates::editor_socket(&data, &name),
+                dcc: std::env::current_exe()?,
+            };
+            let def = templates::instantiate_linked(&template, &name, &folder, &link)?;
             let herdr = CliHerdr::new()?;
             let report = ops::build(&herdr, &def, ops::Options::default())?;
             store.save_workspace(
@@ -1302,6 +1323,13 @@ fn main() -> ExitCode {
             };
         }
         Command::Ssh { action } => ssh_cmd(&dir, action),
+        Command::Code {
+            action: CodeAction::Edit { files },
+        } => std::env::current_dir()
+            .map_err(Error::from)
+            .and_then(|cwd| {
+                dcc::code::edit(std::env::var(dcc::code::ENV_SOCKET).ok(), &cwd, &files)
+            }),
         Command::Usage { action } => data_dir(&dir).and_then(|d| {
             let store = Store::open(&d)?;
             match action {
