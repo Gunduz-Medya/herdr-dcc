@@ -5,6 +5,7 @@ pub mod api;
 pub mod compat;
 pub mod core;
 pub mod fake;
+pub mod install;
 pub mod isolation;
 pub mod layout;
 pub mod mods;

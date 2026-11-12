@@ -13,7 +13,7 @@ use dcc::agent::record::{CliSource, RecordOptions};
 use dcc::agent::{contract, exec, hooks, launch, record, statusline};
 use dcc::config::{inventory, skillshare};
 use dcc::herdr::api::{CliHerdr, Herdr};
-use dcc::herdr::{compat, core, isolation, layout, mods};
+use dcc::herdr::{compat, core, install, isolation, layout, mods};
 use dcc::secret::{KeyringBackend, SERVICE, SecretBackend, set_with};
 use dcc::ssh::model::{Auth, Forward, ForwardKind, HostKeyPolicy, Profile};
 use dcc::ssh::{askpass, ops as ssh_ops};
@@ -384,6 +384,28 @@ enum HerdrAction {
         #[arg(long)]
         no_check: bool,
     },
+    /// Install DCC into the Herdr app home. Without --apply it only shows what it would do.
+    /// With --apply it backs up what it replaces first.
+    Install {
+        #[arg(long)]
+        apply: bool,
+        #[arg(long, default_value = "mods")]
+        mods: PathBuf,
+        #[arg(long, default_value = "assets/tab-icons")]
+        icons: PathBuf,
+        #[arg(long, default_value = "layouts/dcc.recipe.json")]
+        recipe: PathBuf,
+        #[arg(long, default_value = "compat.toml")]
+        compat: PathBuf,
+    },
+    /// Take DCC out again, from the backup an install made. Without --confirm it only lists.
+    Uninstall {
+        /// Folder name of the backup (printed by install).
+        #[arg(long)]
+        backup: String,
+        #[arg(long)]
+        confirm: bool,
+    },
     /// Write the DCC tab bar (the installed tabs mod plus a button for each DCC panel).
     EnsureTabs {
         #[arg(long, default_value = "assets/tab-icons")]
@@ -528,8 +550,20 @@ fn emit(result: Result<Value>) -> ExitCode {
     }
 }
 
+/// The data folder. Given with `--data-dir` or `DCC_DATA_DIR`, else `~/.config/herdr-dcc` (next to
+/// Herdr's own `~/.config/herdr-app`). Development with isolation required has no default, so a
+/// test run can never fall back to the real folder.
 fn data_dir(dir: &Option<PathBuf>) -> Result<PathBuf> {
-    dir.clone()
+    if let Some(d) = dir {
+        return Ok(d.clone());
+    }
+    if isolation::required() {
+        return Err(Error::usage(
+            "no data folder, pass --data-dir <path> or set DCC_DATA_DIR",
+        ));
+    }
+    std::env::var_os("HOME")
+        .map(|h| PathBuf::from(h).join(".config").join("herdr-dcc"))
         .ok_or_else(|| Error::usage("no data folder, pass --data-dir <path> or set DCC_DATA_DIR"))
 }
 
@@ -967,6 +1001,42 @@ fn herdr_cmd(dir: &Option<PathBuf>, action: HerdrAction) -> Result<Value> {
             let ai_home = std::env::var("DCC_AI_HOME").ok();
             let config = json!({ "dcc": exe.to_string_lossy(), "data_dir": data.map(|d| d.to_string_lossy().to_string()), "ai_home": ai_home });
             mods::ensure(&src, &app_home()?, !no_check, Some(&config))
+        }
+        HerdrAction::Install {
+            apply,
+            mods,
+            icons,
+            recipe,
+            compat,
+        } => {
+            let data = abs_data_dir(dir)?;
+            let exe = install::exe_path()?;
+            let home = app_home()?;
+            let supported = std::fs::read_to_string(&compat).ok().and_then(|text| {
+                let pairs = compat::parse(&text);
+                Some(compat::is_supported(
+                    &pairs,
+                    &compat::program_version("herdr-app").ok()?,
+                    &compat::program_version("hc").ok()?,
+                ))
+            });
+            let p = install::Params {
+                app_home: &home,
+                mods_src: &mods,
+                icons: &icons,
+                recipe: &recipe,
+                data_dir: &data,
+                exe: &exe,
+                herdr_supported: supported,
+            };
+            if apply {
+                install::install(&p, &Store::open(&data)?)
+            } else {
+                install::plan(&p)
+            }
+        }
+        HerdrAction::Uninstall { backup, confirm } => {
+            install::uninstall(&app_home()?, &abs_data_dir(dir)?, &backup, confirm)
         }
         HerdrAction::EnsureTabs { icons } => dcc::herdr::tabbar::ensure(&app_home()?, &icons),
         HerdrAction::Core { action } => match action {
