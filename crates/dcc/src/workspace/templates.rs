@@ -74,7 +74,7 @@ pub fn instantiate_linked(
                 Some("nvim") => *startup = Some(format!("nvim --listen {socket}")),
                 None => {
                     *startup = Some(format!(
-                        "export DCC_NVIM_SOCKET={socket}; e() {{ {dcc} code edit \"$@\"; }}; clear"
+                        "export DCC_NVIM_SOCKET={socket}; e() {{ {dcc} code edit \"$@\" >/dev/null; }}; clear"
                     ));
                 }
                 _ => {}

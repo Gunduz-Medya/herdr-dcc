@@ -13,7 +13,7 @@ DCC does not replace your tools. It connects the ones that already work well (He
 | **Workspaces** | Save a space (tabs, split panes, folders, startup commands), close it, restore it later, or start one from a template such as the *code* tab (neovim, lazygit, shell). |
 | **Agents** | One row per AI agent session with its state (waiting, running, completed, failed, stopped), branch, worktree, changed files, last hook event and a warning when two agents share one folder. Ended sessions stay in a local history. |
 | **SSH** | Profiles and groups, passwords or key passphrases kept in the macOS Keychain, one-click connect in its own tab, local, remote and dynamic port forwards you can start and stop, saved one-line commands you can send to a terminal. |
-| **Code** | A lazygit popup in the folder of the focused terminal, a one-click code tab, git facts for that folder. Checks that lazygit and neovim are installed and tells you how to install them if not. |
+| **Code** | A lazygit popup in the folder of the focused terminal, a one-click code tab (neovim, lazygit, shell) where typing `e file` in the bottom shell opens the file in the neovim above, git facts for that folder. Checks that lazygit and neovim are installed and tells you how to install them if not. |
 | **AI config** | A read-only inventory of AI tool files (skills, rules, commands, settings, memory) with paths and sizes only, and a Skillshare sync preview with backup, diff and a separate approval for removals. |
 | **Usage** | Context use and account quota exactly as the agent's own status line reports them, in separate sections. No source means "Unavailable". Nothing is estimated. |
 
