@@ -91,14 +91,14 @@ mod tests {
 
     #[test]
     fn formula_matches_the_value_the_core_reported() {
-        let state = Path::new("/Users/barisgunduz/dev/dcc/.dev/scratch-xdg-remote/state");
+        let state = Path::new("/Users/exampleuser/dev/dcc/.dev/scratch-xdg-remote/state");
         assert_eq!(holder_socket_len(state, "dcc-dev-remote"), 118);
         assert!(check_socket_len(state, "dcc-dev-remote").is_err());
     }
 
     #[test]
     fn short_names_pass() {
-        let state = Path::new("/Users/barisgunduz/dev/dcc/.dev/rx/s");
+        let state = Path::new("/Users/exampleuser/dev/dcc/.dev/rx/s");
         assert!(check_socket_len(state, "dcc-rx").unwrap() <= MAX_SOCKET_BYTES);
     }
 }
