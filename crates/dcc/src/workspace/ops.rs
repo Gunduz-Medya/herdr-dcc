@@ -236,16 +236,17 @@ pub fn build(h: &dyn Herdr, def: &Definition, opts: Options) -> Result<Value> {
 /// For a space that survived a core restart. Types the startup commands into the terminals that
 /// are plain shells again. A terminal that already runs a program is left alone and reported.
 pub fn rehydrate(h: &dyn Herdr, def: &Definition) -> Result<Value> {
-    let space = h
-        .spaces()?
-        .into_iter()
-        .find(|s| s.name == def.name)
-        .ok_or_else(|| {
+    // find_space refuses a name used by more than one space, so commands cannot land in the wrong one
+    let space = find_space(h, &def.name).map_err(|e| {
+        if e.kind == "not_found" {
             Error::not_found(format!(
                 "no open space called {}. Use restore to build it",
                 def.name
             ))
-        })?;
+        } else {
+            e
+        }
+    })?;
     if space.tabs.len() != def.tabs.len() {
         return Err(Error::conflict(format!(
             "the open space has {} tabs, the definition {}",
@@ -253,10 +254,10 @@ pub fn rehydrate(h: &dyn Herdr, def: &Definition) -> Result<Value> {
             def.tabs.len()
         )));
     }
-    let programs: HashMap<String, String> = h
-        .terminals()?
-        .into_iter()
-        .map(|t| (t.address, t.program))
+    let terminals = h.terminals()?;
+    let info: HashMap<&str, (&str, Option<&str>)> = terminals
+        .iter()
+        .map(|t| (t.address.as_str(), (t.program.as_str(), t.cwd.as_deref())))
         .collect();
     let (mut sent, mut skipped) = (Vec::new(), Vec::new());
     for (tab_def, tab_live) in def.tabs.iter().zip(&space.tabs) {
@@ -269,18 +270,27 @@ pub fn rehydrate(h: &dyn Herdr, def: &Definition) -> Result<Value> {
                 leaves.len()
             )));
         }
-        for ((_, startup), t) in leaves.iter().zip(&tab_live.terminals) {
+        for ((saved_cwd, startup), t) in leaves.iter().zip(&tab_live.terminals) {
             let Some(cmd) = startup else { continue };
-            match programs.get(&t.terminal) {
-                Some(p) if is_plain_shell(p) => {
+            match info.get(t.terminal.as_str()) {
+                Some((program, cwd)) if is_plain_shell(program) && same_folder(*cwd, saved_cwd) => {
                     h.send(&t.terminal, cmd)?;
                     sent.push(json!({ "terminal": t.terminal, "command": cmd }));
                 }
-                other => skipped.push(json!({ "terminal": t.terminal, "program": other })),
+                Some((program, cwd)) => {
+                    let reason = if !is_plain_shell(program) { "a program is already running" } else if !same_folder(*cwd, saved_cwd) { "the folder differs from the saved one" } else { "unknown" };
+                    skipped.push(json!({ "terminal": t.terminal, "program": program, "reason": reason }));
+                }
+                None => skipped.push(json!({ "terminal": t.terminal, "program": Value::Null, "reason": "terminal is not live" })),
             }
         }
     }
     Ok(json!({ "rehydrated": def.name, "startup_commands": sent, "skipped": skipped }))
+}
+
+fn same_folder(live: Option<&str>, saved: &str) -> bool {
+    let trim = |s: &str| s.trim_end_matches(['/', '\\']).to_string();
+    live.is_some_and(|l| trim(l) == trim(saved))
 }
 
 /// Restores by saved name, building the space. Unknown names are an error.
@@ -509,6 +519,7 @@ mod tests {
         let r = rehydrate(&h, &def).unwrap();
         assert_eq!(typed_commands(&h)[before..], ["nvim"]);
         assert_eq!(r["skipped"][0]["terminal"], json!(terms[1]));
+        assert_eq!(r["skipped"][0]["reason"], "a program is already running");
         assert_eq!(h.shape("proj", 0).unwrap(), "down(right(proj,proj),proj)");
     }
 
@@ -570,5 +581,33 @@ mod tests {
         assert_eq!(find_space(&h, "twin").unwrap_err().kind, "conflict");
         let id = h.spaces().unwrap()[0].id.clone();
         assert!(close_space(&h, &id).is_ok());
+    }
+
+    #[test]
+    fn rehydrate_refuses_a_duplicate_name_and_a_changed_folder() {
+        let h = FakeHerdr::new();
+        let def = templates::instantiate("code", "proj", "/work/proj").unwrap();
+        build(&h, &def, offline()).unwrap();
+        h.restart_core();
+        // a second space with the same name must stop the command
+        h.add_space("proj", "/elsewhere");
+        assert_eq!(rehydrate(&h, &def).unwrap_err().kind, "conflict");
+        assert!(
+            h.typed().len() == 2,
+            "only the two commands of build exist, nothing new was typed"
+        );
+        // a definition whose folders differ from the live ones types nothing
+        let h2 = FakeHerdr::new();
+        build(&h2, &def, offline()).unwrap();
+        h2.restart_core();
+        let moved = templates::instantiate("code", "proj", "/other/place").unwrap();
+        let before = h2.typed().len();
+        let r = rehydrate(&h2, &moved).unwrap();
+        assert_eq!(h2.typed().len(), before);
+        assert_eq!(r["skipped"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            r["skipped"][0]["reason"],
+            "the folder differs from the saved one"
+        );
     }
 }

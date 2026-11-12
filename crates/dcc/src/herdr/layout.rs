@@ -72,8 +72,23 @@ pub fn apply(base: &Value, recipe: &Value, app_version: &str) -> Result<Value> {
     Ok(out)
 }
 
-pub fn layout_path(app_home: &Path, name: &str) -> PathBuf {
-    app_home.join("layouts").join(format!("{name}.json"))
+/// A layout name is a file name, so only `[A-Za-z0-9_-]` is allowed. A name with a dot or a
+/// separator could point outside the layouts folder.
+pub fn valid_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+pub fn layout_path(app_home: &Path, name: &str) -> Result<PathBuf> {
+    if !valid_name(name) {
+        return Err(Error::usage(format!(
+            "invalid layout name {name:?}, use letters, digits, dash and underscore"
+        )));
+    }
+    Ok(app_home.join("layouts").join(format!("{name}.json")))
 }
 
 /// Builds the layout file when needed. `force` rebuilds it anyway.
@@ -98,7 +113,8 @@ pub fn ensure(
         .and_then(Value::as_str)
         .unwrap_or("main")
         .to_string();
-    let base_path = layout_path(app_home, &base_name);
+    let out_path = layout_path(app_home, &name)?;
+    let base_path = layout_path(app_home, &base_name)?;
     let base_text = fs::read_to_string(&base_path).map_err(|e| {
         Error::not_found(format!(
             "cannot read the base layout {}: {e}",
@@ -112,7 +128,6 @@ pub fn ensure(
         app_version
     );
     let key = format!("layout.{name}.inputs");
-    let out_path = layout_path(app_home, &name);
 
     let reason = if force {
         Some("forced")
@@ -176,6 +191,39 @@ mod tests {
     fn unknown_target_is_an_error() {
         let r = json!({"name":"dcc","insert":[{"into":"nope","block":{"id":"b"}}]});
         assert_eq!(apply(&base(), &r, "v").unwrap_err().kind, "not_found");
+    }
+
+    #[test]
+    fn layout_names_cannot_leave_the_layouts_folder() {
+        for bad in ["", "../x", "a/b", "a\\b", "a.b", "x y", &"n".repeat(65)] {
+            assert!(layout_path(Path::new("/h"), bad).is_err(), "{bad}");
+        }
+        assert!(layout_path(Path::new("/h"), "dcc-2_b").is_ok());
+        let dir = scratch_dir("layout-bad");
+        let recipe_path = dir.join("r.json");
+        fs::write(
+            &recipe_path,
+            json!({"name":"../evil","insert":[]}).to_string(),
+        )
+        .unwrap();
+        let store = Store::open_in_memory().unwrap();
+        assert_eq!(
+            ensure(&dir, &recipe_path, "v", &store, false)
+                .unwrap_err()
+                .kind,
+            "usage"
+        );
+        fs::write(
+            &recipe_path,
+            json!({"name":"ok","base":"../main","insert":[]}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            ensure(&dir, &recipe_path, "v", &store, false)
+                .unwrap_err()
+                .kind,
+            "usage"
+        );
     }
 
     #[test]

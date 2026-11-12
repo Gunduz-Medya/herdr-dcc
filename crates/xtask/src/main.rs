@@ -118,6 +118,10 @@ fn dev_down() -> R<Value> {
             killed.push(t.address);
         }
     }
+    // Holder processes appear once terminals exist, so ask again while the core still runs.
+    pids.extend(core::pids().map_err(|e| e.message)?);
+    pids.sort_unstable();
+    pids.dedup();
     let _ = Command::new("herdr-app").args(["do", "app.quit"]).output();
     std::thread::sleep(Duration::from_secs(2));
     let stopped = core::stop().map_err(|e| e.message)?;
