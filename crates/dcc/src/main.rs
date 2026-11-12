@@ -161,6 +161,8 @@ enum HerdrAction {
 enum CoreAction {
     /// Pids of the running core. Starts a core if none runs, so use it on purpose.
     Pids,
+    /// Start the core of this session. Does nothing when one already runs.
+    Start,
     /// Stop the core.
     Stop,
     /// Exit code 1 and the list when any of these processes still run.
@@ -369,6 +371,7 @@ fn herdr_cmd(dir: &Option<PathBuf>, action: HerdrAction) -> Result<Value> {
         }
         HerdrAction::Core { action } => match action {
             CoreAction::Pids => Ok(json!({ "pids": core::pids()? })),
+            CoreAction::Start => core::start(),
             CoreAction::Stop => core::stop(),
             CoreAction::VerifyClosed { pids } => {
                 let alive = core::alive_of(&pids)?;

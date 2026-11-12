@@ -99,9 +99,9 @@ Mod yüzeyi, modun çağırmasına izin verilen komutlardır. Modlar sandbox'suz
 
 | Grup | Komutlar | Mod yüzeyi |
 | --- | --- | --- |
-| secret | `set` (yalnızca terminal), `exists`, `delete`, `use` (sırrı kendi içinde kullanan komutlar) | `exists` ve `use` evet. `get` komutu yoktur (derlemede bile bulunmaz) |
+| secret | `set` (yalnızca terminal), `exists`, `delete`, `use` (sırrı kendi içinde kullanan komutlar, Faz 3) | `exists` ve `use` evet. `get` komutu yoktur (derlemede bile bulunmaz). `exists` keyring v1 API'sinde değeri okumadan soramadığı için değeri belleğe alıp atar, yazmaz ve döndürmez |
 | agent | `launch`, `exec`, `hook-log`, `statusline-log`, `snapshot`, `sessions` (liste) | `snapshot`, `sessions`, `launch` evet |
-| workspace | `save`, `restore`, `list` | Evet |
+| workspace | `save`, `list`, `restore`, `rehydrate`, `close`, `template list`, `template apply` | Evet. `restore` ve `rehydrate` aynı adlı space varken veya adı birden çok space kullanırken komut yazmaz |
 | ssh | `profile add/list/remove`, `connect`, `forward start/status/stop` | Evet. Sır yalnızca dcc içinde kullanılır |
 | cmd | `add`, `list`, `remove`, `run` (hc send) | Evet |
 | git | `info` (salt okunur), `worktree add/list/remove` | Evet. Silme ayrı onay ister |
@@ -109,7 +109,7 @@ Mod yüzeyi, modun çağırmasına izin verilen komutlardır. Modlar sandbox'suz
 | usage | `samples` (liste) | Evet |
 | job | `start`, `status`, `clean`, `sweep` | Evet |
 | diag | `env`, `contract` (OSC 7501 sözleşme testi) | Evet |
-| herdr | `ensure-layout`, `ensure-mods`, `core` (başlat, durdur, PID doğrula) | Evet |
+| herdr | `check-env`, `compat`, `ensure-layout`, `ensure-mods`, `core start`, `core pids`, `core stop`, `core verify-closed` | Evet |
 
 Tüm okuma komutları geçersiz girdide bile geçerli JSON ve sıfır çıkış koduyla döner (hata bir alandır). Hook komutları her zaman sıfırla çıkar, Claude Code'u bloklamaz.
 

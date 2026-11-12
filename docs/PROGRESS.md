@@ -29,3 +29,29 @@ Her bölüm bir faz kaydıdır. Her kayıtta faz, tarih, ne yapıldı, test sonu
   - Uzak çekirdeği durdururken ortam değişkenlerini zsh'te bölünmeyen bir dizgiyle verdim, yanlış çekirdek durdu. Doğru çekirdek ayrıca durduruldu.
   - `--settings` ile kullanıcı ayar kaynağı açıkken davranış, gerçek Claude'un `hc run` ile açılması, popup modunun kalıcı yüklenmesi, özel bölme oranları, gerçek uzak makine denenmedi.
   - Durma noktası 2. Kullanıcı onayı bekleniyor.
+
+## Faz 1, çekirdek (2026-11-12, branch `phase-1-core`)
+
+- Ne yapıldı.
+  - Cargo workspace (`crates/dcc` kütüphane ve ikili, `crates/xtask`). Modüller `store`, `secret`, `jobs`, `workspace`, `herdr` (api, isolation, compat, layout, mods, core, fake), `error`, `util`. Spike'taki `agent` ve `snapshot` kodu Faz 2'ye bırakıldı, spike klasörü değiştirilmedi.
+  - SQLite deposu (göç sistemi, `workspaces`, `contract_runs`, `herdr_state`, WAL, busy timeout). Job deseni (`start`, `status`, `clean`, `sweep`, 0700). Gizli bilgi (`set` yalnızca terminal, `exists`, `delete`, `get` yok).
+  - Herdr sarmalayıcısı (trait ve gerçek CLI uygulaması, test için sahte Herdr), izolasyon denetimi (`DCC_REQUIRE_ISOLATION=1`, çekirdek soket yolu 103 bayt denetimi, formül Faz 0'daki 118 baytlık gözlemle doğrulandı), `compat.toml`, kendi layout'u (`layouts/dcc.recipe.json`, `ensure-layout`), mod kurulumu (`ensure-mods`, mod için `config.json`), çekirdek (`start`, `pids`, `stop`, `verify-closed`).
+  - Workspace. Tanım bir bölme ağacı. İki tür (şablon ve anlık kayıt), kur (`restore`), yeniden doldur (`rehydrate`) ve kapat (`close`, `space.close` terminalleri bırakırsa sonlandırır). `code` şablonu. `dcc-workspace` modu (liste, Restore ve Rehydrate düğmeleri, odaktaki space'i kaydet).
+  - `xtask` (`env`, `dev-up`, `dev-down`, `leak-scan`, `secret-leak`).
+- Test sonucu.
+  - `cargo test` 48 birim, 8 CLI entegrasyon, 3 xtask testi geçti. `cargo clippy --all-targets` temiz, `cargo fmt` uygulandı.
+  - İzole Herdr senaryosu (gerçek pencere ve core, `HC_SESSION=dcc-dev`).
+    1. 3 sekmeli ve 4 pane'li workspace kaydedildi. Core yeniden başlayınca Herdr yapıyı korudu, `rehydrate` üç komutu doğru terminallere yazdı. Space `dcc workspace close` ile kapatılıp core yeniden başlatıldıktan sonra `restore` aynı yapıyı (sekme adları, klasörler, pane sırası) ve komutları kurdu. Bu çalıştırmada `space.close` dört terminalin dördünü de açık bıraktı, dcc hepsini sonlandırdı (Faz 0'da hepsi kapanmıştı).
+    2. Aynı adlı space açıkken `restore` çıkış kodu 1 ve `conflict`, kayıtsız ad çıkış kodu 3 ve `not_found` verdi.
+    3. `ensure-layout --verify` DCC layout'unu üretti ve `herdr-app status` hata göstermedi. Sürüm veya girdi değişince yeniden üretme birim ve entegrasyon testleriyle doğrulandı, gerçek Herdr güncellemesiyle denenmedi.
+    4. `xtask secret-leak` sahte sırrı gizli prompt üzerinden (pty) kaydetti. 1242 dosya, süreç argümanları ve ekranlarda sızıntı yok (pozitif kontrol bulundu), sır silindi. `secret get` yok (CLI testi).
+    5. Mod üzerinden başlatılan 40 sn'lik job 41,4 sn sürdü, pencere 10 ile 15 ms'de yanıt verdi, 39 zamanlayıcı tıkı çalıştı, en yavaş durum sorgusu 32 ms. `sweep` çalışan job'a dokunmadı.
+    6. `dev-down` uygulama, iki çekirdek ve holder (4 süreç) PID ile kapalı doğrulandı, 8 terminal sonlandırıldı.
+  - Güvenlik taraması (otomatik) 5 bulgu getirdi, hepsi düzeltildi. `rehydrate` yalnızca ada göre ve yinelenen adı reddederek çalışıyor, klasörü değişen veya değiştirilen pane'lere komut yazılmıyor, layout adları `[A-Za-z0-9_-]` ile sınırlı, `dev-down` yalnızca pencere canlıyken PID sorguluyor ve kapatmayı hata durumunda da sürdürüyor.
+- Açık sorun.
+  - Modun Restore ve Rehydrate düğmelerine tıklanmadı. Yalnızca ekran görüntüsünde listenin ve düğmelerin göründüğü doğrulandı. Düğme eylemi (`exec` ile aynı komutlar) CLI'dan denendi.
+  - Özel bölme oranları geri yüklenmedi (yalnızca varsayılan oranlar). Üç ve daha fazla pane'li iç içe ağaç gerçek Herdr'da yalnızca `code` şablonuyla (üç pane) ve 4 pane'li anlık kayıtla denendi.
+  - `exists` keyring v1 API'sinde değeri okumadan soramıyor, değeri belleğe alıp atıyor.
+  - `secret-leak` BSD `script` kullanıyor (yalnızca macOS), `process_alive` yalnızca Unix. Windows'ta hiçbir şey denenmedi.
+  - Modün `config.json` dosyası `dcc` ikilisinin o anki yolunu (debug derlemesi) yazıyor, kurulum yolu Faz sonrası netleşecek.
+  - Katmanlı (`.dev`) araç zinciri kopyası spike'tan salt okunur kopyalandı, spike klasörü değişmedi.

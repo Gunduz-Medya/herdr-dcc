@@ -42,6 +42,21 @@ pub fn pids_from_status(v: &Value) -> Vec<u32> {
     pids
 }
 
+/// Starts the core of the current session (`hc server start`). Does nothing when one already runs.
+pub fn start() -> Result<Value> {
+    let out = Command::new("hc")
+        .args(["server", "start"])
+        .output()
+        .map_err(|e| Error::external(format!("cannot run hc: {e}")))?;
+    if !out.status.success() {
+        return Err(Error::external(format!(
+            "hc server start: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(serde_json::from_slice(&out.stdout).unwrap_or(json!({"started": true})))
+}
+
 pub fn stop() -> Result<Value> {
     let out = Command::new("hc")
         .args(["server", "stop"])

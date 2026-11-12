@@ -10,6 +10,12 @@ Faz 0 doğrulama testlerinden kalanlar (hiçbiri silinmedi).
 - `~/.claude.json` içinde `~/dev/dcc/.dev/t1-repo` için Claude Code'un yazdığı güven kaydı.
 - `~/.claude/projects/-Users-barisgunduz-dev-dcc--dev-t1-repo` klasörü (Claude Code'un yazdığı oturum dosyaları). Adı kural gereği bu çalışmada listelenmedi, silmeden önce `~/.claude/projects` altında listeleyip doğrula.
 
+Faz 1'den kalanlar (hiçbiri silinmedi).
+
+- `~/dev/dcc/.dev/phase0/` (Faz 0'ın scratch klasörleri, yeni SQLite şemasıyla çakışmasın diye taşındı), `~/dev/dcc/.dev/ws-proj/`, `~/dev/dcc/.dev/rust/` (spike'tan kopyalanan Rust araç zinciri, yaklaşık 450 MB, `.dev` içinde), `~/dev/dcc/.dev/job-probe-*.json` ve `~/dev/dcc/.dev/p1-code-template.png`.
+- `~/dev/dcc/target/test-tmp/` (cargo testlerinin geçici klasörleri, `target` içinde).
+- Bu fazda Claude Code oturumu açılmadı, `~/.claude` altında yeni bir şey oluşmadı.
+
 Not. Faz 0 sonunda tüm test süreçleri (uygulama, iki çekirdek, holder'lar, sshd, http sunucusu) PID ile doğrulanmış kapalı.
 
 ## Spike klasöründen (`SPIKE-SUMMARY.md` bölüm 8'den aktarıldı, silinmedi)
