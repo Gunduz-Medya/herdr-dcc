@@ -17,7 +17,7 @@ DCC does not replace your tools. It connects the ones that already work well (He
 | **AI config** | A read-only inventory of AI tool files (skills, rules, commands, settings, memory) with paths and sizes only, and a Skillshare sync preview with backup, diff and a separate approval for removals. |
 | **Usage** | Context use and account quota exactly as the agent's own status line reports them, in separate sections. No source means "Unavailable". Nothing is estimated. |
 
-The panels open from buttons next to the `+` in the tab bar, one at a time, so terminals keep their space.
+The panels open from buttons next to the `+` in the tab bar, never more than two at a time (a third replaces the one opened earlier), so terminals keep their space. Pressing the button of an open panel closes it.
 
 ## How it fits together
 

@@ -277,7 +277,7 @@ mod tests {
     use super::*;
     use crate::util::scratch_dir;
 
-    const TABS: &str = "function find(node, id) {\n}\nconst enabled = shared(\"workspace.panels\") ?? [\"files\", \"changes\"];\n.when(enabled.includes(\"changes\"), el => el.child(panelButton(\"changes\", \"Changes\", \"mods/changes/changes.svg\")))\n";
+    const TABS: &str = "function find(node, id) {\n}\nclass T {\n  render() {\n    const enabled = shared(\"workspace.panels\") ?? [\"files\", \"changes\"];\n    return h_flex().size_full().min_w(0).px(10).pl(lightsPadding)\n.when(enabled.includes(\"changes\"), el => el.child(panelButton(\"changes\", \"Changes\", \"mods/changes/changes.svg\")))\n  }\n}\n";
 
     struct Setup {
         home: PathBuf,
