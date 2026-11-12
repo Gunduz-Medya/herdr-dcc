@@ -7,9 +7,27 @@
       "block": {
         "id": "dcc-workspace",
         "type": "block",
-        "size": { "px": 340 },
+        "size": {
+          "px": 340
+        },
         "min": 260,
-        "content": { "mod": "dcc-workspace" }
+        "content": {
+          "mod": "dcc-workspace"
+        }
+      }
+    },
+    {
+      "into": "work-body",
+      "block": {
+        "id": "dcc-agents",
+        "type": "block",
+        "size": {
+          "px": 360
+        },
+        "min": 280,
+        "content": {
+          "mod": "dcc-agents"
+        }
       }
     }
   ]

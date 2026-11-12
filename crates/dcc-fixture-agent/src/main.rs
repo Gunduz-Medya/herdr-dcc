@@ -22,13 +22,32 @@ fn osc(payload: &str) {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let value = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
+    let value = |flag: &str| {
+        args.iter()
+            .position(|a| a == flag)
+            .and_then(|i| args.get(i + 1))
+            .cloned()
+    };
     let broken = value("--mode").as_deref() == Some("broken");
-    let step = Duration::from_millis(value("--step-ms").and_then(|v| v.parse().ok()).unwrap_or(1200));
+    let step = Duration::from_millis(
+        value("--step-ms")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1200),
+    );
     let steps: [&str; 4] = if broken {
-        ["stat=idle:app=dcc-fixture", "", "state=sleeping:app=dcc-fixture", "app=dcc-fixture"]
+        [
+            "stat=idle:app=dcc-fixture",
+            "",
+            "state=sleeping:app=dcc-fixture",
+            "app=dcc-fixture",
+        ]
     } else {
-        ["state=idle:app=dcc-fixture", "state=working:app=dcc-fixture", "state=blocked:app=dcc-fixture:kind=permission", "state=done:app=dcc-fixture"]
+        [
+            "state=idle:app=dcc-fixture",
+            "state=working:app=dcc-fixture",
+            "state=blocked:app=dcc-fixture:kind=permission",
+            "state=done:app=dcc-fixture",
+        ]
     };
     for s in steps {
         osc(s);
@@ -40,5 +59,9 @@ fn main() {
         }
     }
     std::thread::sleep(step);
-    std::process::exit(value("--exit-code").and_then(|v| v.parse().ok()).unwrap_or(0));
+    std::process::exit(
+        value("--exit-code")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
+    );
 }

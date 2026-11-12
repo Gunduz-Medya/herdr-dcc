@@ -22,10 +22,12 @@ pub fn git(cwd: &str, args: &[&str]) -> Option<String> {
 pub fn git_with_timeout(cwd: &str, args: &[&str], timeout: Duration) -> Option<String> {
     // `core.fsmonitor` in a repository's own config is a command that `git status` runs. DCC reads
     // folders of agents and terminals, some of them cloned from places nobody vetted, so that hook
-    // is switched off for every read only call. `--no-optional-locks` keeps the index untouched.
+    // is switched off for every read only call, and the filter drivers are emptied for `status`
+    // (see `filter_overrides`). `--no-optional-locks` keeps the index untouched.
     let mut child = Command::new("git")
         .args(["-c", "core.fsmonitor=false"])
         .arg("--no-optional-locks")
+        .env("GIT_TERMINAL_PROMPT", "0")
         .arg("-C")
         .arg(cwd)
         .args(args)
@@ -60,6 +62,39 @@ pub fn git_with_timeout(cwd: &str, args: &[&str], timeout: Duration) -> Option<S
             Err(_) => return None,
         }
     }
+}
+
+/// Names of the filter drivers (`filter.<name>.clean` and friends) defined in the configuration
+/// that applies to this folder. Reading configuration runs nothing.
+fn filter_driver_names(cwd: &str) -> Vec<String> {
+    let text = git(cwd, &["config", "--get-regexp", r"^filter\."]).unwrap_or_default();
+    let mut names: Vec<String> = text
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .filter_map(|key| {
+            key.strip_prefix("filter.")?
+                .rsplit_once('.')
+                .map(|(name, _)| name.to_string())
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// `-c` options that empty every filter driver, so `git status` cannot run a command that a
+/// repository (through `.gitattributes` and its config) asks for while it compares file contents.
+fn filter_overrides(cwd: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for name in filter_driver_names(cwd) {
+        for key in ["clean", "smudge", "process"] {
+            out.push("-c".to_string());
+            out.push(format!("filter.{name}.{key}="));
+        }
+        out.push("-c".to_string());
+        out.push(format!("filter.{name}.required=false"));
+    }
+    out
 }
 
 fn same_path(a: &str, b: &str) -> bool {
@@ -154,7 +189,11 @@ pub fn info(cwd: &str) -> Option<GitInfo> {
             true,
         ),
     };
-    let counts = git(cwd, &["status", "--porcelain"]).map(|t| count_porcelain(&t));
+    // status compares file contents, which can run the clean filters of the repository
+    let overrides = filter_overrides(cwd);
+    let mut status_args: Vec<&str> = overrides.iter().map(String::as_str).collect();
+    status_args.extend(["status", "--porcelain"]);
+    let counts = git(cwd, &status_args).map(|t| count_porcelain(&t));
     Some(GitInfo {
         repo_root: root,
         branch,
@@ -393,6 +432,71 @@ mod tests {
         assert!(
             !marker.exists(),
             "dcc ran the fsmonitor command of the repository"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_repository_cannot_run_its_own_clean_filter_through_dcc() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = scratch_repo("git-filter");
+        let name = d.file_name().unwrap().to_string_lossy().to_string();
+        let marker = d.join("..").join(format!("{name}-filter-marker"));
+        let script = d.join("..").join(format!("{name}-filter.sh"));
+        fs::write(
+            &script,
+            format!("#!/bin/sh\necho ran >> '{}'\ncat\n", marker.display()),
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(d.join(".gitattributes"), "*.dat filter=evil\n").unwrap();
+        fs::write(d.join("a.dat"), "one\n").unwrap();
+        sh(&d, &["add", ".gitattributes", "a.dat"]);
+        sh(&d, &["commit", "-q", "-m", "files"]);
+        sh(
+            &d,
+            &["config", "filter.evil.clean", script.to_str().unwrap()],
+        );
+        // same size, different content and time, so git has to look at the file again
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        fs::write(d.join("a.dat"), "two\n").unwrap();
+
+        // positive control, plain git runs the filter
+        let plain = Command::new("git")
+            .arg("-C")
+            .arg(&d)
+            .args(["status", "--porcelain"])
+            .output()
+            .unwrap();
+        assert!(plain.status.success());
+        assert!(
+            marker.exists(),
+            "the control must show that the config really runs a command"
+        );
+        fs::remove_file(&marker).unwrap();
+
+        // through dcc it does not, and the change is still counted
+        let i = info(d.to_str().unwrap()).unwrap();
+        assert!(
+            !marker.exists(),
+            "dcc ran the clean filter of the repository"
+        );
+        assert_eq!(i.changed, Some(1));
+    }
+
+    #[test]
+    fn filter_names_come_from_the_configuration() {
+        let d = scratch_repo("git-filter-names");
+        sh(&d, &["config", "filter.one.clean", "x"]);
+        sh(&d, &["config", "filter.two.dotted.name.smudge", "y"]);
+        let names = filter_driver_names(d.to_str().unwrap());
+        // a global config (git lfs for example) may add more names
+        assert!(names.contains(&"one".to_string()));
+        assert!(names.contains(&"two.dotted.name".to_string()));
+        let o = filter_overrides(d.to_str().unwrap());
+        assert!(
+            o.contains(&"filter.one.clean=".to_string())
+                && o.contains(&"filter.two.dotted.name.process=".to_string())
         );
     }
 
