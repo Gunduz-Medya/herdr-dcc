@@ -6,6 +6,7 @@ pub mod git;
 pub mod herdr;
 pub mod jobs;
 pub mod secret;
+pub mod ssh;
 pub mod store;
 pub mod util;
 pub mod workspace;

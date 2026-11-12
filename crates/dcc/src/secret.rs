@@ -19,6 +19,9 @@ pub trait SecretBackend {
     fn exists(&self, name: &str) -> Result<bool>;
     /// Returns false when there was nothing to delete.
     fn delete(&self, name: &str) -> Result<bool>;
+    /// The value, for use inside the dcc process that needs it (the ssh askpass server). It is
+    /// never printed, logged or put on a command line, and no command exposes it.
+    fn reveal(&self, name: &str) -> Result<Option<String>>;
 }
 
 /// A name is a short identifier. It ends up in the keychain item, never a value.
@@ -89,6 +92,13 @@ impl SecretBackend for KeyringBackend {
             Err(e) => Err(Error::external(format!("keychain error on exists: {e}"))),
         }
     }
+    fn reveal(&self, name: &str) -> Result<Option<String>> {
+        match self.entry(name)?.get_password() {
+            Ok(v) => Ok(Some(v)),
+            Err(KeyringError::NoEntry) => Ok(None),
+            Err(e) => Err(Error::external(format!("keychain error on read: {e}"))),
+        }
+    }
     fn delete(&self, name: &str) -> Result<bool> {
         match self.entry(name)?.delete_credential() {
             Ok(()) => Ok(true),
@@ -127,6 +137,9 @@ impl SecretBackend for MemoryBackend {
     }
     fn delete(&self, name: &str) -> Result<bool> {
         Ok(self.items.lock().unwrap().remove(name).is_some())
+    }
+    fn reveal(&self, name: &str) -> Result<Option<String>> {
+        Ok(self.items.lock().unwrap().get(name).cloned())
     }
 }
 

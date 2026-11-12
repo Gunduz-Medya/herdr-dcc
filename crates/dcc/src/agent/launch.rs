@@ -12,7 +12,6 @@
 //! 5. the shell the new tab started with is closed, so the tab holds the agent only.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -22,9 +21,9 @@ use super::state::DccState;
 use crate::error::{Error, Result};
 use crate::git;
 use crate::herdr::api::Herdr;
+use crate::herdr::tabs::{TabSpec, run_in_new_tab};
 use crate::store::Store;
 use crate::util::{create_private_dir, new_uuid};
-use crate::workspace::ops::find_space_by_name;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorktreeMode {
@@ -61,17 +60,6 @@ fn worktree_path(repo_root: &str, short: &str) -> PathBuf {
         .unwrap_or(root)
         .join(format!("{name}.worktrees"))
         .join(short)
-}
-
-fn tab_pane(h: &dyn Herdr, space_id: &str, tab_id: &str, terminal: &str) -> Result<Option<String>> {
-    Ok(h.spaces()?
-        .iter()
-        .filter(|s| s.id == space_id)
-        .flat_map(|s| s.tabs.iter())
-        .filter(|t| t.id == tab_id)
-        .flat_map(|t| t.terminals.iter())
-        .find(|t| t.terminal == terminal)
-        .map(|t| t.pane.clone()))
 }
 
 pub fn launch(store: &Store, h: &dyn Herdr, p: &LaunchParams, now_ms: i64) -> Result<Value> {
@@ -153,26 +141,6 @@ pub fn launch(store: &Store, h: &dyn Herdr, p: &LaunchParams, now_ms: i64) -> Re
 
     // a tab of its own, in the named space
     let tab_name = format!("agent {short}");
-    let made = match find_space_by_name(h, &p.space) {
-        Ok(space) => h.app_do(
-            "tab.new",
-            json!({ "space": space.id, "name": tab_name, "folder": cwd }),
-        )?,
-        Err(e) if e.kind == "not_found" => h.app_do(
-            "space.new",
-            json!({ "name": p.space, "folder": cwd, "tab": tab_name }),
-        )?,
-        Err(e) => return Err(e),
-    };
-    let text = |k: &str| {
-        made.get(k)
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .ok_or_else(|| Error::external(format!("herdr-app answered without {k}")))
-    };
-    let (space_id, tab_id, shell) = (text("space")?, text("tab")?, text("terminal")?);
-    let shell_pane = tab_pane(h, &space_id, &tab_id, &shell)?;
-
     let mut argv: Vec<String> = vec![
         p.dcc_exe.to_string_lossy().into(),
         "--data-dir".into(),
@@ -185,36 +153,23 @@ pub fn launch(store: &Store, h: &dyn Herdr, p: &LaunchParams, now_ms: i64) -> Re
         plan.program.clone(),
     ];
     argv.extend(plan.args.iter().cloned());
-    let labels = vec![
-        ("herdr.space".to_string(), space_id.clone()),
-        ("herdr.tab".to_string(), tab_id.clone()),
-        ("dcc.run".to_string(), run_id.clone()),
-    ];
-    let terminal = h.run_labeled(&format!("dcc-{short}"), &cwd, &labels, &argv)?;
-    run.terminal_addr = Some(terminal.clone());
+    let labels = vec![("dcc.run".to_string(), run_id.clone())];
+    let run_name = format!("dcc-{short}");
+    let placed = run_in_new_tab(
+        h,
+        &TabSpec {
+            space: &p.space,
+            tab_name: &tab_name,
+            cwd: &cwd,
+            run_name: &run_name,
+            extra_labels: &labels,
+            argv: &argv,
+            what: "agent",
+        },
+    )?;
+    run.terminal_addr = Some(placed.terminal.clone());
     store.update_run(&run)?;
-
-    // close the shell the tab started with, once the agent has joined the tab
-    let mut warnings = Vec::new();
-    let start = Instant::now();
-    let joined = loop {
-        if tab_pane(h, &space_id, &tab_id, &terminal)?.is_some() {
-            break true;
-        }
-        if start.elapsed() > Duration::from_secs(4) {
-            break false;
-        }
-        std::thread::sleep(Duration::from_millis(150));
-    };
-    match (joined, shell_pane) {
-        (true, Some(pane)) => {
-            if let Err(e) = h.app_do("pane.close", json!({ "pane": pane })) {
-                warnings.push(format!("could not close the starting shell: {}", e.message));
-            }
-        }
-        (false, _) => warnings.push("the agent terminal did not show up in its tab within 4 s, the starting shell was left open".into()),
-        (true, None) => {}
-    }
+    let (terminal, warnings) = (placed.terminal, placed.warnings);
     Ok(json!({
         "run_id": run_id, "session_id": run_id, "terminal": terminal, "space": p.space, "tab": tab_name, "cwd": cwd,
         "worktree": worktree_path_used, "branch": run.branch, "settings": settings_path.to_string_lossy(), "warnings": warnings,

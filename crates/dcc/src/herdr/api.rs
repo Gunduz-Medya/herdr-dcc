@@ -41,6 +41,15 @@ pub struct TerminalInfo {
     pub live: bool,
 }
 
+/// A terminal that carries a label (`hc run --label key=value`), live or finished.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabeledTerminal {
+    pub address: String,
+    pub value: String,
+    pub live: bool,
+    pub exit_code: Option<i64>,
+}
+
 pub trait Herdr {
     fn spaces(&self) -> Result<Vec<SpaceInfo>>;
     /// Live terminals of this core.
@@ -50,6 +59,10 @@ pub trait Herdr {
     /// `hc send <terminal> <text>`: pastes the text and presses Enter.
     fn send(&self, terminal: &str, text: &str) -> Result<()>;
     fn kill(&self, terminal: &str) -> Result<()>;
+    /// Terminals that carry the label `key`, with the label's value.
+    fn labeled(&self, key: &str) -> Result<Vec<LabeledTerminal>>;
+    /// Herdr's agent status of a live terminal (working, blocked, idle, done), `None` when it has none.
+    fn terminal_status(&self, terminal: &str) -> Result<Option<String>>;
     /// `hc run --bg --json --name <name> --cwd <cwd> --label k=v ... -- <argv>`. With the labels
     /// `herdr.space` and `herdr.tab` the terminal joins that tab, and unlike a terminal opened by
     /// `terminal.open` it keeps its exit code when the program ends (Phase 0 test 4).
@@ -145,6 +158,33 @@ pub fn cwd_map(terminals: &[TerminalInfo]) -> HashMap<String, String> {
         .collect()
 }
 
+/// The status text of a terminal row, either a plain string or an object with `state`.
+pub fn status_of(t: &Value) -> Option<String> {
+    match t.get("status") {
+        Some(Value::String(x)) if !x.is_empty() => Some(x.clone()),
+        Some(Value::Object(o)) => o.get("state").and_then(Value::as_str).map(str::to_string),
+        _ => None,
+    }
+}
+
+pub fn parse_labeled(v: &Value, key: &str) -> Vec<LabeledTerminal> {
+    v.get("terminals")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|t| {
+            let value = t.get("labels")?.get(key)?.as_str()?.to_string();
+            Some(LabeledTerminal {
+                address: text(t, "address"),
+                value,
+                live: text(t, "state") == "live",
+                exit_code: t.get("exit_code").and_then(Value::as_i64),
+            })
+        })
+        .collect()
+}
+
 pub struct CliHerdr;
 
 impl CliHerdr {
@@ -190,6 +230,19 @@ impl Herdr for CliHerdr {
     }
     fn kill(&self, terminal: &str) -> Result<()> {
         Self::run("hc", &["kill", terminal]).map(|_| ())
+    }
+    fn labeled(&self, key: &str) -> Result<Vec<LabeledTerminal>> {
+        let all = Self::run_json("hc", &["ls", "--all", "--json"])?;
+        Ok(parse_labeled(&all, key))
+    }
+    fn terminal_status(&self, terminal: &str) -> Result<Option<String>> {
+        let all = Self::run_json("hc", &["ls", "--json"])?;
+        let t = all
+            .get("terminals")
+            .and_then(Value::as_array)
+            .and_then(|a| a.iter().find(|t| text(t, "address") == terminal))
+            .ok_or_else(|| Error::not_found(format!("no live terminal {terminal}")))?;
+        Ok(status_of(t))
     }
     fn run_labeled(
         &self,
@@ -249,6 +302,26 @@ mod tests {
                 pane: "p2".into()
             }
         );
+    }
+
+    #[test]
+    fn parses_labels_and_status() {
+        let v = json!({"terminals":[
+            {"address":"t1","state":"live","labels":{"dcc.forward":"a/b"}},
+            {"address":"t2","state":"finished","exit_code":255,"labels":{"dcc.forward":"a/c"}},
+            {"address":"t3","state":"live","labels":{"other":"x"}}]});
+        let l = parse_labeled(&v, "dcc.forward");
+        assert_eq!(l.len(), 2);
+        assert!(l[0].live && !l[1].live && l[1].exit_code == Some(255));
+        assert_eq!(
+            status_of(&json!({"status":"blocked"})).as_deref(),
+            Some("blocked")
+        );
+        assert_eq!(
+            status_of(&json!({"status":{"state":"idle"}})).as_deref(),
+            Some("idle")
+        );
+        assert_eq!(status_of(&json!({})), None);
     }
 
     #[test]

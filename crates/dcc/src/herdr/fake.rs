@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use serde_json::{Value, json};
 
-use super::api::{Herdr, SpaceInfo, TabInfo, TermRef, TerminalInfo};
+use super::api::{Herdr, LabeledTerminal, SpaceInfo, TabInfo, TermRef, TerminalInfo};
 use crate::error::{Error, Result};
 
 /// A `run_labeled` call: name, argv and labels.
@@ -44,6 +44,8 @@ struct FTerm {
     cwd: String,
     program: String,
     live: bool,
+    labels: Vec<(String, String)>,
+    status: Option<String>,
 }
 
 #[derive(Default)]
@@ -89,6 +91,8 @@ impl State {
                 cwd: cwd.to_string(),
                 program: program.to_string(),
                 live: true,
+                labels: Vec::new(),
+                status: None,
             },
         );
         self.pane_term.insert(pane.clone(), term.clone());
@@ -190,6 +194,13 @@ impl FakeHerdr {
     /// What `run_labeled` was asked to start: name, argv and labels.
     pub fn launched(&self) -> Vec<Launched> {
         self.s.borrow().launched.clone()
+    }
+
+    /// Test helper, sets the status Herdr would report for a terminal.
+    pub fn set_status(&self, terminal: &str, status: &str) {
+        if let Some(t) = self.s.borrow_mut().terms.get_mut(terminal) {
+            t.status = Some(status.to_string());
+        }
     }
 
     pub fn typed(&self) -> Vec<(String, String)> {
@@ -436,6 +447,9 @@ impl Herdr for FakeHerdr {
             .map(|a| a.rsplit('/').next().unwrap_or(a).to_string())
             .unwrap_or_default();
         let (term, pane) = s.new_terminal(cwd, &program);
+        if let Some(t) = s.terms.get_mut(&term) {
+            t.labels = labels.to_vec();
+        }
         let tab_id = labels
             .iter()
             .find(|(k, _)| k == "herdr.tab")
@@ -455,6 +469,33 @@ impl Herdr for FakeHerdr {
             }
         }
         Ok(term)
+    }
+
+    fn labeled(&self, key: &str) -> Result<Vec<LabeledTerminal>> {
+        let s = self.s.borrow();
+        let mut out: Vec<LabeledTerminal> = s
+            .terms
+            .iter()
+            .filter_map(|(addr, t)| {
+                let value = t.labels.iter().find(|(k, _)| k == key)?.1.clone();
+                Some(LabeledTerminal {
+                    address: addr.clone(),
+                    value,
+                    live: t.live,
+                    exit_code: None,
+                })
+            })
+            .collect();
+        out.sort_by(|a, b| a.address.cmp(&b.address));
+        Ok(out)
+    }
+
+    fn terminal_status(&self, terminal: &str) -> Result<Option<String>> {
+        let s = self.s.borrow();
+        match s.terms.get(terminal) {
+            Some(t) if t.live => Ok(t.status.clone()),
+            _ => Err(Error::not_found(format!("no live terminal {terminal}"))),
+        }
     }
 
     fn kill(&self, terminal: &str) -> Result<()> {

@@ -86,6 +86,40 @@ const MIGRATIONS: &[&str] = &[
         notification_type TEXT
      );
      CREATE INDEX agent_events_run ON agent_events (run_id, ts_ms);",
+    // 3, ssh groups, profiles, forwards and saved commands. Secrets are not here, the name rule
+    // (`ssh.<profile>`) points at the Keychain item.
+    "CREATE TABLE ssh_groups (
+        name       TEXT PRIMARY KEY
+     );
+     CREATE TABLE ssh_profiles (
+        name            TEXT PRIMARY KEY,
+        grp             TEXT REFERENCES ssh_groups(name) ON DELETE SET NULL,
+        host            TEXT NOT NULL,
+        port            INTEGER NOT NULL,
+        user            TEXT NOT NULL,
+        identity_file   TEXT,
+        auth            TEXT NOT NULL,
+        host_key_policy TEXT NOT NULL,
+        config_file     TEXT,
+        created_ms      INTEGER NOT NULL
+     );
+     CREATE TABLE port_forwards (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        profile     TEXT NOT NULL REFERENCES ssh_profiles(name) ON DELETE CASCADE,
+        name        TEXT NOT NULL,
+        kind        TEXT NOT NULL,
+        bind_host   TEXT NOT NULL,
+        bind_port   INTEGER NOT NULL,
+        target_host TEXT NOT NULL,
+        target_port INTEGER NOT NULL,
+        UNIQUE (profile, name)
+     );
+     CREATE TABLE saved_commands (
+        name       TEXT PRIMARY KEY,
+        command    TEXT NOT NULL,
+        profile    TEXT REFERENCES ssh_profiles(name) ON DELETE SET NULL,
+        created_ms INTEGER NOT NULL
+     );",
 ];
 
 pub struct Store {
@@ -284,6 +318,10 @@ mod tests {
                 "agent_sessions",
                 "contract_runs",
                 "herdr_state",
+                "port_forwards",
+                "saved_commands",
+                "ssh_groups",
+                "ssh_profiles",
                 "workspaces"
             ]
         );

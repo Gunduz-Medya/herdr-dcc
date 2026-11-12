@@ -14,6 +14,8 @@ use dcc::agent::{contract, exec, hooks, launch, record, statusline};
 use dcc::herdr::api::{CliHerdr, Herdr};
 use dcc::herdr::{compat, core, isolation, layout, mods};
 use dcc::secret::{KeyringBackend, SERVICE, SecretBackend, set_with};
+use dcc::ssh::model::{Auth, Forward, ForwardKind, HostKeyPolicy, Profile};
+use dcc::ssh::{askpass, ops as ssh_ops};
 use dcc::store::Store;
 use dcc::util::now_ms;
 use dcc::workspace::{ops, templates};
@@ -56,6 +58,11 @@ enum Command {
         #[command(subcommand)]
         action: AgentAction,
     },
+    /// SSH profiles, port forwards and saved commands.
+    Ssh {
+        #[command(subcommand)]
+        action: SshAction,
+    },
     /// Read only git facts and worktrees.
     Git {
         #[command(subcommand)]
@@ -70,6 +77,141 @@ enum Command {
     Debug {
         #[command(subcommand)]
         action: DebugAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum SshAction {
+    Group {
+        #[command(subcommand)]
+        action: SshGroupAction,
+    },
+    Profile {
+        #[command(subcommand)]
+        action: SshProfileAction,
+    },
+    /// Open a tab with an ssh session for a profile.
+    Connect { profile: String },
+    Forward {
+        #[command(subcommand)]
+        action: SshForwardAction,
+    },
+    Command {
+        #[command(subcommand)]
+        action: SshCommandAction,
+    },
+    /// Runs ssh for a profile in this terminal. Started by connect and forward start.
+    #[command(hide = true)]
+    Run {
+        profile: String,
+        #[arg(long)]
+        forward: Option<String>,
+    },
+    /// The program ssh runs to ask for a password. Internal.
+    #[command(hide = true)]
+    Askpass {
+        #[arg(last = true)]
+        prompt: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SshGroupAction {
+    Add { name: String },
+    List,
+}
+
+#[derive(Subcommand)]
+enum SshProfileAction {
+    Add {
+        name: String,
+        #[arg(long)]
+        host: String,
+        #[arg(long)]
+        user: String,
+        #[arg(long, default_value_t = 22)]
+        port: u16,
+        #[arg(long)]
+        group: Option<String>,
+        #[arg(long)]
+        identity_file: Option<String>,
+        /// key, passphrase or password.
+        #[arg(long, default_value = "key")]
+        auth: String,
+        /// strict (default) or accept-new.
+        #[arg(long, default_value = "strict")]
+        host_key_policy: String,
+        /// ssh -F file. Without it ssh reads the user's own configuration.
+        #[arg(long)]
+        config_file: Option<String>,
+    },
+    List,
+    Show {
+        name: String,
+    },
+    /// Remove a profile, its forwards and its Keychain item. Needs --confirm.
+    Delete {
+        name: String,
+        #[arg(long)]
+        confirm: bool,
+    },
+    /// Store the password or passphrase of a profile through a hidden prompt on a terminal.
+    Secret {
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum SshForwardAction {
+    Add {
+        profile: String,
+        name: String,
+        /// local, remote or dynamic.
+        #[arg(long)]
+        kind: String,
+        #[arg(long, default_value = "127.0.0.1")]
+        bind_host: String,
+        #[arg(long)]
+        bind_port: u16,
+        /// host:port, not used by dynamic forwards.
+        #[arg(long)]
+        target: Option<String>,
+    },
+    /// Stored forwards with their state from the core.
+    List,
+    Start {
+        profile: String,
+        name: String,
+    },
+    Stop {
+        profile: String,
+        name: String,
+    },
+    Delete {
+        profile: String,
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum SshCommandAction {
+    Add {
+        name: String,
+        #[arg(long)]
+        profile: Option<String>,
+        command: String,
+    },
+    List,
+    /// Type a saved command into a terminal.
+    Run {
+        name: String,
+        #[arg(long)]
+        terminal: String,
+        #[arg(long)]
+        force: bool,
+    },
+    Delete {
+        name: String,
     },
 }
 
@@ -344,6 +486,200 @@ fn secret(action: SecretAction) -> Result<Value> {
             }
         }
     }
+}
+
+fn split_target(t: &str) -> Result<(String, u16)> {
+    let (host, port) = t
+        .rsplit_once(':')
+        .ok_or_else(|| Error::usage("--target is host:port"))?;
+    let port = port
+        .parse::<u16>()
+        .map_err(|_| Error::usage("the target port must be 1 to 65535"))?;
+    Ok((host.trim_matches(['[', ']']).to_string(), port))
+}
+
+fn ssh_cmd(dir: &Option<PathBuf>, action: SshAction) -> Result<Value> {
+    let store = Store::open(&data_dir(dir)?)?;
+    let backend = KeyringBackend::new(SERVICE);
+    match action {
+        SshAction::Group { action } => match action {
+            SshGroupAction::Add { name } => {
+                store.add_ssh_group(&name)?;
+                Ok(json!({ "group": name }))
+            }
+            SshGroupAction::List => Ok(json!({ "groups": store.ssh_groups()? })),
+        },
+        SshAction::Profile { action } => match action {
+            SshProfileAction::Add {
+                name,
+                host,
+                user,
+                port,
+                group,
+                identity_file,
+                auth,
+                host_key_policy,
+                config_file,
+            } => {
+                let p = Profile {
+                    name,
+                    group,
+                    host,
+                    port,
+                    user,
+                    identity_file,
+                    auth: Auth::parse(&auth)?,
+                    host_key_policy: HostKeyPolicy::parse(&host_key_policy)?,
+                    config_file,
+                };
+                store.add_ssh_profile(&p)?;
+                Ok(
+                    json!({ "profile": p.name, "secret_needed": p.auth.needs_secret(), "secret_name": p.secret_name() }),
+                )
+            }
+            SshProfileAction::List => {
+                let rows: Vec<Value> = store
+                    .ssh_profiles()?
+                    .iter()
+                    .map(|p| profile_row(p, &backend))
+                    .collect::<Result<_>>()?;
+                Ok(json!({ "profiles": rows }))
+            }
+            SshProfileAction::Show { name } => profile_row(&store.ssh_profile(&name)?, &backend),
+            SshProfileAction::Delete { name, confirm } => {
+                let p = store.ssh_profile(&name)?;
+                if !confirm {
+                    return Err(Error::usage(
+                        "deleting a profile removes its forwards and its Keychain item, pass --confirm",
+                    ));
+                }
+                store.delete_ssh_profile(&name)?;
+                let secret_removed = backend.delete(&p.secret_name())?;
+                Ok(json!({ "deleted": name, "secret_removed": secret_removed }))
+            }
+            SshProfileAction::Secret { name } => {
+                let p = store.ssh_profile(&name)?;
+                if !p.auth.needs_secret() {
+                    return Err(Error::usage(
+                        "this profile uses a key without passphrase, there is no secret",
+                    ));
+                }
+                if !std::io::stdin().is_terminal() {
+                    return Err(Error::usage(
+                        "profile secret needs a terminal for its hidden prompt. It reads nothing from argv or a pipe.",
+                    ));
+                }
+                set_with(&backend, &p.secret_name(), |prompt| {
+                    rpassword::prompt_password(prompt)
+                })?;
+                Ok(json!({ "profile": name, "stored": true }))
+            }
+        },
+        SshAction::Connect { profile } => {
+            let h = CliHerdr::new()?;
+            ssh_ops::connect(
+                &store,
+                &h,
+                &backend,
+                &profile,
+                &std::env::current_exe()?,
+                &abs_data_dir(dir)?,
+            )
+        }
+        SshAction::Forward { action } => match action {
+            SshForwardAction::Add {
+                profile,
+                name,
+                kind,
+                bind_host,
+                bind_port,
+                target,
+            } => {
+                let kind = ForwardKind::parse(&kind)?;
+                let (target_host, target_port) = match (kind, target) {
+                    (ForwardKind::Dynamic, None) => (String::new(), 0),
+                    (ForwardKind::Dynamic, Some(_)) => {
+                        return Err(Error::usage("a dynamic forward has no --target"));
+                    }
+                    (_, Some(t)) => split_target(&t)?,
+                    (_, None) => return Err(Error::usage("--target host:port is required")),
+                };
+                let f = Forward {
+                    id: 0,
+                    profile,
+                    name,
+                    kind,
+                    bind_host,
+                    bind_port,
+                    target_host,
+                    target_port,
+                };
+                store.add_forward(&f)?;
+                Ok(ssh_ops::forward_row(&f))
+            }
+            SshForwardAction::List => ssh_ops::forwards_status(&store, &CliHerdr::new()?),
+            SshForwardAction::Start { profile, name } => ssh_ops::forward_start(
+                &store,
+                &CliHerdr::new()?,
+                &backend,
+                &profile,
+                &name,
+                &std::env::current_exe()?,
+                &abs_data_dir(dir)?,
+            ),
+            SshForwardAction::Stop { profile, name } => {
+                ssh_ops::forward_stop(&CliHerdr::new()?, &profile, &name)
+            }
+            SshForwardAction::Delete { profile, name } => {
+                store.delete_forward(&profile, &name)?;
+                Ok(json!({ "deleted": format!("{profile}/{name}") }))
+            }
+        },
+        SshAction::Command { action } => match action {
+            SshCommandAction::Add {
+                name,
+                profile,
+                command,
+            } => ssh_ops::add_command(&store, &name, &command, profile.as_deref()),
+            SshCommandAction::List => {
+                let rows: Vec<Value> = store
+                    .saved_commands()?
+                    .iter()
+                    .map(|c| json!({ "name": c.name, "command": c.command, "profile": c.profile }))
+                    .collect();
+                Ok(json!({ "commands": rows }))
+            }
+            SshCommandAction::Run {
+                name,
+                terminal,
+                force,
+            } => ssh_ops::run_command(&store, &CliHerdr::new()?, &name, &terminal, force),
+            SshCommandAction::Delete { name } => {
+                store.delete_saved_command(&name)?;
+                Ok(json!({ "deleted": name }))
+            }
+        },
+        SshAction::Run { .. } | SshAction::Askpass { .. } => Err(Error::usage("internal command")),
+    }
+}
+
+fn profile_row(p: &Profile, backend: &dyn SecretBackend) -> Result<Value> {
+    let secret = if p.auth.needs_secret() {
+        json!(backend.exists(&p.secret_name())?)
+    } else {
+        Value::Null
+    };
+    Ok(json!({
+        "name": p.name, "group": p.group, "host": p.host, "port": p.port, "user": p.user,
+        "identity_file": p.identity_file, "auth": p.auth.as_str(),
+        "host_key_policy": p.host_key_policy.as_str(), "config_file": p.config_file,
+        "secret_stored": secret,
+    }))
+}
+
+fn abs_data_dir(dir: &Option<PathBuf>) -> Result<PathBuf> {
+    let d = data_dir(dir)?;
+    Ok(d.canonicalize().unwrap_or(d))
 }
 
 fn workspace(dir: &Option<PathBuf>, action: WorkspaceAction) -> Result<Value> {
@@ -696,6 +1032,42 @@ fn main() -> ExitCode {
             std::thread::sleep(std::time::Duration::from_secs(seconds));
             Ok(json!({ "slept": seconds }))
         }
+        Command::Ssh {
+            action: SshAction::Askpass { prompt },
+        } => {
+            return match askpass::answer(&prompt.join(" ")) {
+                Ok(secret) => {
+                    println!("{secret}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("dcc askpass: {}", e.message);
+                    ExitCode::from(1)
+                }
+            };
+        }
+        Command::Ssh {
+            action: SshAction::Run { profile, forward },
+        } => {
+            let outcome = data_dir(&dir).and_then(|d| {
+                let store = Store::open(&d)?;
+                ssh_ops::run_session(
+                    &store,
+                    &KeyringBackend::new(SERVICE),
+                    &profile,
+                    forward.as_deref(),
+                    &std::env::current_exe()?,
+                )
+            });
+            return match outcome {
+                Ok(code) => ExitCode::from(code.clamp(0, 255) as u8),
+                Err(e) => {
+                    eprintln!("{}", e.to_json());
+                    ExitCode::from(e.exit_code())
+                }
+            };
+        }
+        Command::Ssh { action } => ssh_cmd(&dir, action),
         Command::Secret { action } => secret(action),
         Command::Workspace { action } => workspace(&dir, action),
         Command::Job { action } => data_dir(&dir).and_then(|d| match action {

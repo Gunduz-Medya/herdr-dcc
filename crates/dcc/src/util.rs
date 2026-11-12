@@ -40,6 +40,25 @@ pub fn create_private_dir(path: &Path) -> Result<()> {
 /// A random (version 4) uuid. The bytes come from the random keys the standard library hashes with
 /// (a fresh `RandomState` per call), mixed with the clock and the process id. Good enough to name
 /// runs and sessions, not for secrets.
+/// Random hex text of `bytes` bytes (twice as many characters) from the operating system. Falls
+/// back to the uuid source where `/dev/urandom` does not exist.
+pub fn random_hex(bytes: usize) -> String {
+    use std::io::Read;
+    let mut buf = vec![0u8; bytes];
+    let ok = std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut buf))
+        .is_ok();
+    if !ok {
+        return new_uuid()
+            .replace('-', "")
+            .chars()
+            .cycle()
+            .take(bytes * 2)
+            .collect();
+    }
+    buf.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 pub fn new_uuid() -> String {
     use std::hash::{BuildHasher, Hasher, RandomState};
     let mut bytes = [0u8; 16];
