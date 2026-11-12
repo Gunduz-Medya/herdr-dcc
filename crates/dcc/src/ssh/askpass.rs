@@ -5,6 +5,11 @@
 //! only a caller that holds this run's random nonce (given to ssh through its environment), only
 //! for the kind of prompt the profile expects, and only a few times. A host key question is always
 //! refused, the user decides about unknown hosts with the profile's host key policy.
+//!
+//! Remaining limit. The nonce travels in the environment of ssh, so a program that ssh itself
+//! starts (a ProxyCommand from the user's own configuration) can read it. What it can get is
+//! bounded, three answers, only to a password style prompt, only while ssh runs. The caller is not
+//! checked by process id, that needs an unsafe system call.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;

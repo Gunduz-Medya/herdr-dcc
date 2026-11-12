@@ -246,6 +246,17 @@ impl Profile {
                 }
             ),
         ]);
+        if self.auth.needs_secret() {
+            // The secret socket is reachable from the environment of ssh and of the programs it
+            // starts. Programs a configuration file would start on its own (local commands, the
+            // known hosts command) are switched off so they cannot ask for it.
+            a.extend([
+                "-o".into(),
+                "PermitLocalCommand=no".into(),
+                "-o".into(),
+                "KnownHostsCommand=none".into(),
+            ]);
+        }
         match self.auth {
             Auth::Key => {}
             Auth::Passphrase => {
@@ -409,6 +420,14 @@ pub(crate) mod tests {
         let a = p.session_args().unwrap();
         assert!(a.contains(&"PubkeyAuthentication=no".to_string()));
         assert!(a.contains(&"NumberOfPasswordPrompts=1".to_string()));
+        assert!(a.contains(&"PermitLocalCommand=no".to_string()));
+        assert!(a.contains(&"KnownHostsCommand=none".to_string()));
+        assert!(
+            !profile()
+                .session_args()
+                .unwrap()
+                .contains(&"PermitLocalCommand=no".to_string())
+        );
         p.auth = Auth::Passphrase;
         p.identity_file = Some("/k/id".into());
         let a = p.session_args().unwrap();

@@ -22,8 +22,23 @@ fn home() -> String {
     std::env::var("HOME").unwrap_or_else(|_| "/".into())
 }
 
+/// The ssh that runs. The system one when it exists, so a changed PATH cannot swap it. Debug
+/// builds (the tests) accept an absolute `DCC_SSH_PROGRAM`, release builds ignore it.
 fn ssh_program() -> String {
-    std::env::var("DCC_SSH_PROGRAM").unwrap_or_else(|_| "ssh".into())
+    #[cfg(debug_assertions)]
+    if let Ok(p) = std::env::var("DCC_SSH_PROGRAM")
+        && Path::new(&p).is_absolute()
+    {
+        return p;
+    }
+    [
+        "/usr/bin/ssh",
+        "/usr/local/bin/ssh",
+        "/opt/homebrew/bin/ssh",
+    ]
+    .iter()
+    .find(|p| Path::new(p).exists())
+    .map_or_else(|| "ssh".to_string(), |p| (*p).to_string())
 }
 
 fn runner_argv(exe: &Path, data_dir: &Path, profile: &str, forward: Option<&str>) -> Vec<String> {
