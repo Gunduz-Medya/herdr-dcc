@@ -1,0 +1,6 @@
+# Herdr version pairs DCC accepts. The agent status channel (OSC 7501) is not documented, so a
+# pair that is not listed here gets a warning and the contract test must pass first.
+# Measured pairs only. Add a pair after the contract test passed on it.
+[[supported]]
+app = "0.1.15"
+core = "0.1.20"

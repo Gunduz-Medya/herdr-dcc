@@ -1,0 +1,16 @@
+{
+  "name": "dcc",
+  "base": "main",
+  "insert": [
+    {
+      "into": "work-body",
+      "block": {
+        "id": "dcc-workspace",
+        "type": "block",
+        "size": { "px": 340 },
+        "min": 260,
+        "content": { "mod": "dcc-workspace" }
+      }
+    }
+  ]
+}

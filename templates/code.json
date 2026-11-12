@@ -1,0 +1,20 @@
+{
+  "name": "code",
+  "tabs": [
+    {
+      "name": "code",
+      "named": true,
+      "tree": {
+        "type": "split",
+        "direction": "down",
+        "first": {
+          "type": "split",
+          "direction": "right",
+          "first": { "type": "pane", "cwd": "{folder}", "startup": "nvim" },
+          "second": { "type": "pane", "cwd": "{folder}", "startup": "lazygit" }
+        },
+        "second": { "type": "pane", "cwd": "{folder}" }
+      }
+    }
+  ]
+}
