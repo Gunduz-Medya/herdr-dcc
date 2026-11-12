@@ -4,7 +4,13 @@ Hiçbir şey otomatik silinmez. Silinmesi gerekenler yol yol burada tutulur, sil
 
 ## Bu depodan
 
-Henüz yok.
+Faz 0 doğrulama testlerinden kalanlar (hiçbiri silinmedi).
+
+- `~/dev/dcc/.dev/` klasörü. Git'e girmiyor. İçinde test repoları (`t1-repo`, `t2-repo`, `t2-repo-b`), deneme betikleri, loglar, ekran görüntüleri, scratch Herdr klasörleri (`scratch-home`, `scratch-xdg`, `scratch-data`, `rx`), test sshd anahtarları ve yapılandırması (`ssh/`, yalnızca bu test için üretildi) ve `settings.before.sha` var.
+- `~/.claude.json` içinde `~/dev/dcc/.dev/t1-repo` için Claude Code'un yazdığı güven kaydı.
+- `~/.claude/projects/-Users-barisgunduz-dev-dcc--dev-t1-repo` klasörü (Claude Code'un yazdığı oturum dosyaları). Adı kural gereği bu çalışmada listelenmedi, silmeden önce `~/.claude/projects` altında listeleyip doğrula.
+
+Not. Faz 0 sonunda tüm test süreçleri (uygulama, iki çekirdek, holder'lar, sshd, http sunucusu) PID ile doğrulanmış kapalı.
 
 ## Spike klasöründen (`SPIKE-SUMMARY.md` bölüm 8'den aktarıldı, silinmedi)
 

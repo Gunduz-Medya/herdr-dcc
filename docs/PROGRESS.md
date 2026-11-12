@@ -13,3 +13,19 @@ Her bölüm bir faz kaydıdır. Her kayıtta faz, tarih, ne yapıldı, test sonu
   - Brifteki "global yazı kuralları dosyalarını oku" (`~/.claude`) maddesi uygulanmadı, çünkü görev kuralları `~/.claude` altını okumayı yasaklıyor. Yazım kuralları görev metnindeki listeye göre uygulandı.
   - İlk (boş) commit `main` üzerinde, çünkü dallanmak için bir kök commit gerekiyor. Dokümanlar `phase-1-docs` branch'inde.
   - Durma noktası 1. Kullanıcı onayı bekleniyor.
+
+## Faz 0, doğrulama testleri (2026-11-12)
+
+- Ne yapıldı. Beş test izole ortamda (`HC_SESSION=dcc-dev`, `~/dev/dcc/.dev`) yürütüldü. Sonuçlar `docs/06-validation.md` içinde.
+  1. `claude --settings` ile hook ve statusline geçti. Ek bulgu, `/clear` yeni oturum kimliği üretiyor.
+  2. Lazygit ve neovim pane'de, lazygit popup'ı geçti. Popup için modun yüklü olması gerekiyor.
+  3. Kod sekmesi geçti (koşullu). Şablon bir komut dizisi, Herdr yapıyı kendisi koruyor, programlar kayboluyor.
+  4. SQLite oturum kaydı geçti (koşullu). Çıkış kodu yalnızca `hc run` ile açılan terminalde var.
+  5. SSH geçti (yalnızca localhost). Üç yönlendirme türü ve `hc machine add --via` çalıştı. Çekirdek soket yolu 103 bayt ile sınırlı.
+- Mimariye etki. `03-architecture.md` (çalıştırma ve oturum ayrımı, `hc run` ile başlatma, workspace iki mod, mod yükleme, soket yolu), `05-roadmap.md` (Faz 1, 2 ve 3 görevleri), `02-PRD.md` (açık sorular) güncellendi.
+- Test sonucu. `~/.claude/settings.json` özeti ve zamanı değişmedi. Test süreçleri PID ile doğrulanmış kapalı.
+- Açık sorun.
+  - Test 3'te core yeniden başlatması, Test 1'in güven sorusunda bekleyen Claude sürecini öldürdü, onay iki kez istendi.
+  - Uzak çekirdeği durdururken ortam değişkenlerini zsh'te bölünmeyen bir dizgiyle verdim, yanlış çekirdek durdu. Doğru çekirdek ayrıca durduruldu.
+  - `--settings` ile kullanıcı ayar kaynağı açıkken davranış, gerçek Claude'un `hc run` ile açılması, popup modunun kalıcı yüklenmesi, özel bölme oranları, gerçek uzak makine denenmedi.
+  - Durma noktası 2. Kullanıcı onayı bekleniyor.

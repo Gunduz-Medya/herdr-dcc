@@ -55,7 +55,7 @@ Hedef dışı (MVP için)
 
 - Salt okunur çoklu agent paneli. Satır başına durum, oturum kimliği, branch, worktree etiketi, değişen dosya sayısı (staged, unstaged, yeni), son olay.
 - Durum kaynağı Herdr çekirdek durumu. Hook'lar yalnızca kimlik ve ek bilgi içindir (KK-09).
-- DCC'nin kendi başlattığı agent'lar `claude --settings <geçici dosya> --session-id <uuid>` ile açılır, temiz ve açık bir ortamla. Hook ve statusline bu ayar dosyasından gelir (KK-02).
+- DCC'nin kendi başlattığı agent'lar `claude --settings <geçici dosya> --session-id <uuid>` ile, `hc run` üzerinden, temiz ve açık bir ortamla açılır. Hook ve statusline bu ayar dosyasından gelir (KK-02). `/clear` yeni bir oturum kimliği üretir, DCC bunu aynı çalıştırmanın yeni oturumu olarak kaydeder.
 - Dışarıdan başlatılan agent'larda yalnızca Herdr durumu ve klasör eşlemesi gösterilir.
 - Oturum kaydı SQLite'ta. Kapanan oturum son durumuyla (Completed, Stopped, Failed) listede kalır (KK-11).
 - Güven sorusu bekleyen agent "Unknown, güven sorusu olabilir" diye görünür. DCC onay vermez.
@@ -155,11 +155,11 @@ MVP yalnızca macOS Apple Silicon. Kod platformdan bağımsız yazılır (yol bi
 
 1. Herdr masaüstü uygulaması ve core hangi lisansla dağıtılıyor. Araştırmada yalnızca bir TUI deposu bulundu ve o sayfa Apache 2.0 diyor, ama o sayfa masaüstü uygulamasını veya core'u anmıyor. Doğrulanmadı.
 2. Herdr 0.1.x için API kararlılığı taahhüdü var mı. Belge taramasında görülmedi.
-3. `claude --settings` ile hook ve statusline enjeksiyonu çalışıyor mu. Faz 0 test 1.
+3. `claude --settings` ile hook ve statusline enjeksiyonu çalışıyor. Faz 0 test 1 geçti (`docs/06-validation.md`). Kullanıcının kendi ayar kaynağı ve hook'larıyla birleşmesi denenmedi.
 4. Codex, Gemini CLI, Cursor ve Grok OSC 7501 yayınlıyor mu. Denenmedi.
-5. `/clear` veya resume sonrası `--session-id` ile verilen kimlik ne oluyor (risk 21). Denenmedi.
+5. `/clear` sonrası kimlik. Faz 0 test 1'de `/clear` aynı süreçte yeni bir oturum kimliği üretti (risk 21 doğrulandı). Resume denenmedi.
 6. Mod API'sinde olay akışı (`events.subscribe`) var mı. d.ts taraması tam değil.
-7. SSH port yönlendirme ve uzak makine bağlantısı Herdr'da nasıl davranıyor. Faz 0 test 5.
+7. SSH port yönlendirme ve uzak makine. Faz 0 test 5'te localhost ile çalıştı. Gerçek bir uzak makine ve parolayla giriş denenmedi.
 8. Keychain, imzasız ikili güncellenince onay penceresi çıkarıyor mu (risk 6). Denenmedi.
 9. Windows'ta hangi yetenekler çalışıyor. Hiçbiri sınanmadı.
-10. Lazygit ve neovim Herdr pane'inde ve popup olarak nasıl çalışıyor. Faz 0 test 2 ve 3.
+10. Lazygit ve neovim pane'de ve popup olarak çalıştı (Faz 0 test 2 ve 3). Popup için modun yüklü olması gerekiyor ve layout bloğuyla kalıcı yükleme denenmedi.

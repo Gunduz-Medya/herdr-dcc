@@ -30,7 +30,7 @@ Sıranın gerekçesi. Çekirdek her şeyin altyapısı (SQLite, job, Keychain, l
 
 ## 3. Faz 0, doğrulama testleri
 
-**Hedef.** MVP'den önce açık kalan beş soruyu izole ortamda, en küçük modelle ve kısa oturumlarla yanıtlamak. Sonuçlar `docs/06-validation.md` içine yazılır.
+**Hedef.** MVP'den önce açık kalan beş soruyu izole ortamda, en küçük modelle ve kısa oturumlarla yanıtlamak. Sonuçlar `docs/06-validation.md` içine yazılır. Durum, tamamlandı (2026-11-12), beş test geçti, koşulları ve etkileri o dosyada.
 
 **Görevler ve beklenen sonuçlar.**
 
@@ -65,8 +65,8 @@ Sıranın gerekçesi. Çekirdek her şeyin altyapısı (SQLite, job, Keychain, l
 4. Gizli bilgi. `secret set` (yalnızca terminal), `exists`, `delete`. `get` komutu yazılmaz.
 5. Herdr sarmalayıcısı. `herdr-app` ve `hc` çağrıları, izolasyon doğrulaması, çekirdek başlatma ve durdurma, PID ile kapanış doğrulaması. `hc server status` canlılık sınaması olarak kullanılmaz.
 6. Kendi layout. Tarif dosyası, `dcc herdr ensure-layout`, `ensure-mods`, sürüm çifti kaydı (`compat.toml`).
-7. Workspace kaydet ve geri yükle. Space kapanırken terminallerin bilerek kapatılması veya park edilmesi. Üç ve daha fazla pane ile restore denenir (spike'ta denenmedi).
-8. Geliştirme araçları. `xtask` ile izole ortam başlatma, çekirdek ve uygulama kapatma, sızıntı taraması.
+7. Workspace kaydet ve geri yükle, iki modda. Şablon (bizim komut ağacımız, örneğin kod sekmesi) ve yaklaşık anlık kayıt. Geri yüklemede iki yol, core yeniden başlayınca programları yeniden yazma (`hc send`) ve space kapalıysa ağacı yeniden kurma. Space kapanırken terminallerin bilerek kapatılması veya park edilmesi ve doğrulanması (`space.close` tutarsız). Özel bölme oranları ve üç ve daha fazla pane denenir.
+8. Geliştirme araçları. `xtask` ile izole ortam başlatma, çekirdek ve uygulama kapatma, sızıntı taraması. Oturum adları ve veri yolları kısa tutulur ve çekirdek soket yolu 103 bayt sınırına karşı başlangıçta denetlenir (Faz 0 test 5). Süreç kapanışları PID ile doğrulanır, ortam değişkenleri açıkça dışa aktarılır (zsh'te bölünmeyen dizgi hatası yaşandı).
 
 **Modüller.** `crates/dcc`, `crates/xtask`, `layouts/`, `mods/dcc-workspace`.
 
@@ -93,9 +93,9 @@ Sıranın gerekçesi. Çekirdek her şeyin altyapısı (SQLite, job, Keychain, l
 **Görevler.**
 
 1. Adapter arayüzü ve Claude Code adapter'ı (`docs/03-architecture.md` bölüm 6). `GenericAdapter` yalnızca Herdr durumu ve klasör eşlemesi için.
-2. `dcc agent exec` (ortam temizleme) ve `dcc agent launch` (worktree seçimi, oturum kimliği, geçici ayar dosyası, `--settings` ve `--session-id`). Test 1 sonucuna göre.
+2. `dcc agent exec` (ortam temizleme) ve `dcc agent launch` (worktree seçimi, oturum kimliği, geçici ayar dosyası, `--settings` ve `--session-id`). Test 1 `--settings` yolunun çalıştığını gösterdi. Agent `hc run --bg` ve `herdr.space`, `herdr.tab` etiketleriyle açılır, çünkü çıkış kodu yalnızca bu yolda gelir (test 4). Gerçek Claude Code ile bu yolun denenmesi ve etiketli sekmeyi almak için kullanılan boş sekmedeki shell pane'inin kapatılması bu fazın ilk işidir.
 3. `hook-log` ve `statusline-log` komutları. Alan beyaz listesi, her zaman sıfır çıkış.
-4. `snapshot --record`. Git bilgisi, kimlik (argv, hook, none), DCC durumu, SQLite yazımı. Bitmiş oturumların kapatılması (Completed, Stopped, Failed). DCC'nin gönderdiği kesme Stopped olarak kaydedilir.
+4. `snapshot --record`. Git bilgisi, kimlik (argv, hook, none), DCC durumu, SQLite yazımı. Kayıt iki katmanlıdır, `agent_runs` (süreç) ve `agent_sessions` (oturum). `/clear` aynı çalıştırmada yeni oturum kimliği üretir (test 1), yeni `SessionStart` yeni oturum satırı açar. Bitmiş çalıştırmaların çekirdek kaydından kapatılması (Completed, Stopped, Failed). DCC'nin gönderdiği kesme Stopped olarak kaydedilir.
 5. OSC 7501 sözleşme testi (`dcc diag contract`) ve `dcc-fixture-agent`.
 6. `dcc-agents` modu (salt okunur). Sıralama Waiting, Running, Unknown, Completed, Stopped, Failed. Çekirdek durumu kullanılır. Güven sorusu için Unknown notu. Kota alanı "Unavailable" (Faz 6'ya kadar).
 7. Agent başına worktree otomasyonu (`git worktree add`), silme ayrı onayla.
@@ -109,7 +109,7 @@ Sıranın gerekçesi. Çekirdek her şeyin altyapısı (SQLite, job, Keychain, l
 1. İki agent aynı anda iki satır gösteriyor (farklı branch, farklı worktree etiketi).
 2. Durum değişikliği panele medyan 3 sn içinde yansıyor (spike'ta 1,1 sn).
 3. Agent çıkınca ve `hc kill` ile öldürülünce satır kayıttan geliyor, Completed ve Stopped ayrımı doğru. Failed için bir test (öldürülmüş değil, sıfır olmayan çıkışlı sahte süreç).
-4. `--session-id` ile başlatılan agent'ın kimliği argv, hook ve kayıtta aynı.
+4. `--session-id` ile başlatılan agent'ın ilk oturum kimliği argv, hook ve kayıtta aynı. `/clear` sonrası yeni kimlik yeni oturum olarak kayda giriyor ve aynı çalıştırmaya bağlanıyor.
 5. Hook ve statusline günlüklerinde konuşma içeriği yok (test), hook komutu her durumda sıfırla çıkıyor.
 6. Sözleşme testi geçiyor, bozuk bir fixture ile "durum tespiti güvenilmez" moduna giriyor.
 7. Aynı klasörde iki agent uyarı gösteriyor (risk 22).
@@ -127,7 +127,7 @@ Sıranın gerekçesi. Çekirdek her şeyin altyapısı (SQLite, job, Keychain, l
 1. `ssh_groups`, `ssh_profiles`, `port_forwards`, `saved_commands` tabloları ve komutları.
 2. Parola ve passphrase girişi gizli terminal panelinden. Sırrı alt sürece verme yolunun seçimi (askpass veya ortam) ve taramalı test.
 3. Bağlanma (pane içinde ssh veya `hc machine`, test 5 sonucuna göre).
-4. Port yönlendirme (local, remote, dynamic) job olarak.
+4. Port yönlendirme (local, remote, dynamic). Test 5'te üçü de `ssh -N` ile `hc run --bg` terminali olarak çalıştı ve `hc kill` ile durdu. Süreç çekirdek tarafından izlenir. Job klasörü deseni dcc'nin kendi iç işleri için kalır. Uzak makine için `hc machine add --via ... --session ...` kullanılır, uzak tarafta `hc` PATH'te olmalıdır.
 5. Kayıtlı komutlar. Çalıştırma `hc send` ile, bloklu programa `--force` olmadan yazılmaz. Komut kaydında sır deseni taraması.
 6. `dcc-ssh` modu (profil listesi, bağlan, yönlendirmeler, komutlar).
 
@@ -141,7 +141,7 @@ Sıranın gerekçesi. Çekirdek her şeyin altyapısı (SQLite, job, Keychain, l
 2. Bağlantı açılır (localhost ssh ile test, gerçek sunucuya bağlanılmaz).
 3. Port yönlendirme job olarak çalışır, durumu paneldeki satırdan görülür ve durdurulur.
 4. Kayıtlı komut seçilen terminalde çalışır.
-5. Gerçek uzak makine bağlantısı ve SFTP dosya gezgini kapsam dışı olarak işaretli.
+5. Gerçek uzak makine bağlantısı (localhost dışı), parolayla giriş, `ssh-agent` ve SFTP dosya gezgini bu fazda denenmemiş veya kapsam dışı olarak işaretli.
 
 **Test planı.** Birim (profil, şema), entegrasyon (localhost ssh), güvenlik taraması, mod senaryosu.
 

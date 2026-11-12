@@ -63,6 +63,7 @@ flowchart LR
 3. Mod `dcc agent snapshot --input <dosya> --record` komutunu çağırır. dcc her kayıt için git bilgisini (zaman aşımlı, kilitsiz), oturum kimliğini ve DCC durumunu hesaplar, SQLite'a yazar ve JSON döner.
 4. Mod JSON'u çizer. Veri değişmediyse yeniden çizmez.
 5. Panelden kaybolan terminal için dcc, kaydı `hc` ile kontrol eder (bitti, çıkış kodu, neden) ve oturumu Completed, Stopped veya Failed olarak kapatır.
+6. Bir agent süreci (çalıştırma) birden çok oturum taşıyabilir. Faz 0 testinde `/clear` aynı süreçte `SessionEnd` ve yeni bir oturum kimliğiyle `SessionStart` üretti. Bu yüzden kayıt iki katmanlıdır (bölüm 5) ve argv'deki kimlik yalnızca ilk oturumu gösterir.
 
 Spike ölçümü, snapshot 19 ile 26 ms, panel gecikmesi medyan 1,1 sn, en kötü 5,3 sn. Panelden kaybolan oturumların kaydı henüz spike'ta yoktu (Faz 2'de yapılır).
 
@@ -71,7 +72,8 @@ Spike ölçümü, snapshot 19 ile 26 ms, panel gecikmesi medyan 1,1 sn, en köt�
 1. `dcc agent launch` repo ve (istenirse) yeni bir worktree seçer. Agent başına ayrı worktree varsayılandır.
 2. Oturum kimliği olarak yeni bir uuid üretir ve SQLite'a `starting` durumuyla yazar.
 3. Geçici bir ayar dosyası üretir (`<veri klasörü>/agents/<kimlik>/settings.json`). Hook (SessionStart, UserPromptSubmit, PreToolUse, Notification, Stop, SessionEnd) `dcc agent hook-log` komutunu, statusLine `dcc agent statusline-log` komutunu çalıştırır.
-4. Agent komutu `dcc agent exec -- claude --settings <dosya> --session-id <uuid> ...` ile Herdr'da `terminal.open` veya `tab.new` ile açılır. `dcc agent exec` ortamdaki `CLAUDE*` ve `AI_AGENT` değişkenlerini temizler ve programı çalıştırır. Unix'te süreç değişimi (exec) ile, böylece Herdr'ın görünen programı agent kalır. Windows'ta doğrulanmadı.
+4. Agent `hc run --bg --label herdr.space=<id> --label herdr.tab=<id> -- dcc agent exec -- claude --settings <dosya> --session-id <uuid> ...` ile açılır. Etiketler terminali Herdr sekmesine bağlar. `terminal.open` ile açılan agent shell'in içinde çalıştığı için çıkınca terminal canlı kalır ve çıkış kodu yoktur, bu yüzden bu yol kullanılmaz (Faz 0 test 4). `dcc agent exec` ortamdaki `CLAUDE*` ve `AI_AGENT` değişkenlerini temizler ve programı çalıştırır. Unix'te süreç değişimi (exec) ile, böylece Herdr'ın görünen programı agent kalır. Windows'ta doğrulanmadı.
+   Doğrulanmadı. Gerçek Claude Code'un bu yolla açılması (çekirdeğin PATH ve ortamı, güven sorusu), etiketli sekmeyi almak için kullanılan boş sekmedeki shell pane'inin kapatılması.
 5. Güven sorusu çıkarsa Herdr durum göstermez (spike'ta yaklaşık 132 sn). DCC satırı "Unknown, güven sorusu olabilir" gösterir ve onay vermez.
 
 `--settings` ile hook ve statusline enjeksiyonu spike'ta denenmedi (Faz 0 test 1). Spike'ta proje düzeyi `settings.local.json` çalıştı.
@@ -79,6 +81,13 @@ Spike ölçümü, snapshot 19 ile 26 ms, panel gecikmesi medyan 1,1 sn, en köt�
 ### 3.3 Workspace kaydet ve geri yükle
 
 `dcc workspace save` Herdr'dan (`herdr-app ls`, `hc ls --json`) sekmeleri, klasörleri ve pane sırasını okur, başlangıç komutlarıyla SQLite'a yazar. `restore` `herdr-app do space.new`, `tab.new`, `terminal.open {folder, place}` ve `hc send` çağırır. Aynı adlı space açıksa reddeder. Split yönü ve boyutu okunamaz, pane'ler sırayla sağa bölünür (KK-05). Space kapanırken terminaller bilerek kapatılır veya park edilir.
+
+İki mod vardır (Faz 0 test 3).
+
+- **Şablon.** Bizim yazdığımız bir komut ağacı. Örneğin kod sekmesi şu dizidir: `space.new` (neovim), `terminal.open down` (shell), `pane.focus` (üst pane), `terminal.open right` (lazygit). Varsayılan oranlarda aynı düzeni verdi. Özel oranlar denenmedi.
+- **Anlık kayıt.** Rastgele bir workspace'in kaydı. Herdr bölme yönünü ve oranını vermediği için pane sırası ve klasörler yaklaşık kalır.
+
+Geri yükleme de iki yoldur. Core yeniden başlayınca Herdr yapıyı, sekme adlarını ve klasörleri kendisi korur ve her terminal boş shell olur. Bu durumda dcc yalnızca programları yeniden yazar (`hc send`). Space kapatılmışsa dcc ağacı komut dizisiyle yeniden kurar. `space.close` bazen terminalleri kapatıyor bazen kapatmıyor (Faz 0 test 3 ve spike Adım 4 farklı çıktı), bu yüzden her kapanışta terminaller doğrulanır ve kapatılır.
 
 ### 3.4 Uzun işler
 
@@ -109,16 +118,15 @@ Tüm okuma komutları geçersiz girdide bile geçerli JSON ve sıfır çıkış 
 Tek dosya, WAL modu, 5 sn busy timeout, `PRAGMA user_version` ile numaralı göç (migration). Zaman damgaları milisaniye. Sütunlarda konuşma içeriği yoktur.
 
 ```sql
-CREATE TABLE agent_sessions (
-  id              TEXT PRIMARY KEY,          -- oturum kimliği (uuid)
+CREATE TABLE agent_runs (                    -- bir agent süreci, bir terminal
+  id              TEXT PRIMARY KEY,          -- DCC'nin verdiği uuid (--session-id, ilk oturumun kimliği)
   agent_kind      TEXT NOT NULL,             -- claude, codex, ...
   launch_mode     TEXT NOT NULL,             -- dcc | external
-  id_source       TEXT NOT NULL,             -- argv | hook | none
   started_ms      INTEGER NOT NULL,
   ended_ms        INTEGER,
   last_state      TEXT NOT NULL,             -- Running|Waiting|Completed|Failed|Stopped|Unknown
   last_state_ms   INTEGER NOT NULL,
-  end_reason      TEXT,                      -- session_end | killed | exit_code | lost
+  end_reason      TEXT,                      -- exited_0 | exit_code | killed | session_end | lost
   exit_code       INTEGER,
   cwd             TEXT,
   repo_root       TEXT,
@@ -132,11 +140,21 @@ CREATE TABLE agent_sessions (
   terminal_addr   TEXT,
   pane_id         TEXT
 );
-CREATE INDEX agent_sessions_state ON agent_sessions (last_state, last_state_ms);
+CREATE INDEX agent_runs_state ON agent_runs (last_state, last_state_ms);
+
+CREATE TABLE agent_sessions (                -- bir koşuda birden çok olabilir (/clear)
+  id          TEXT PRIMARY KEY,              -- hook session_id
+  run_id      TEXT NOT NULL REFERENCES agent_runs(id),
+  id_source   TEXT NOT NULL,                 -- argv | hook | none
+  started_ms  INTEGER NOT NULL,
+  ended_ms    INTEGER,
+  end_source  TEXT                           -- session_end | clear | lost
+);
 
 CREATE TABLE agent_events (                  -- yalnızca izinli alanlar
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id  TEXT NOT NULL REFERENCES agent_sessions(id),
+  run_id      TEXT NOT NULL REFERENCES agent_runs(id),
+  session_id  TEXT REFERENCES agent_sessions(id),
   ts_ms       INTEGER NOT NULL,
   kind        TEXT NOT NULL,                 -- hook adı veya state_change
   state       TEXT,
@@ -186,6 +204,7 @@ CREATE TABLE saved_commands (
 CREATE TABLE usage_samples (                 -- yalnızca resmi kaynaktan gelen gözlem
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   ts_ms       INTEGER NOT NULL,
+  run_id      TEXT REFERENCES agent_runs(id),
   session_id  TEXT REFERENCES agent_sessions(id),
   kind        TEXT NOT NULL,                 -- context | quota
   window      TEXT,                          -- five_hour | seven_day | session
@@ -211,7 +230,7 @@ Notlar.
 
 - `usage_samples` değerleri tahmin değil statusline'dan okunan gözlemdir. Kaynak yoksa satır yazılmaz ve panel "Unavailable" der.
 - Komut metni (`saved_commands.command`) kayıt anında sır deseni için taranır. Parola komut satırına yazılmaz.
-- `workspaces` tablosu spike'ta denenen şemadır. `agent_sessions` ve diğer tablolar spike'ta yoktu, bu şema bir öneridir ve Faz 1 ve 2'de testle doğrulanır.
+- `workspaces` tablosu spike'ta denenen şemadır. `agent_runs`, `agent_sessions` ve diğer tablolar spike'ta yoktu. Faz 0 test 4 çekirdek verisinden Completed, Stopped, Failed ayrımını bir prototiple gösterdi, tam şema Faz 1 ve 2'de testle doğrulanır.
 
 ## 6. Agent adapter arayüzü ve durum modeli
 
@@ -250,6 +269,8 @@ Ortak durum modeli. Kurallar spike'ta (Adım 6) yazıldı ve 9 testle denendi. �
 | 10 | Durum yok, ön planda claude | Unknown (güven sorusu veya başlıyor) |
 | 11 | Diğer | Unknown |
 
+Durum kuralları agent çalıştırması (run) içindir. Çıkış kodu ve neden (kural 1 ile 3) yalnızca doğrudan `hc run` ile açılan terminalde bulunur (Faz 0 test 4). `/clear` aynı çalıştırmada yeni bir oturum başlatır, durum kaydı çalıştırmaya, kimlik kaydı oturuma yazılır.
+
 Notlar. Esc ile iptal `idle` olur ve ayrı bir durum değildir (Stop hook'u tetiklenmez). DCC'nin kendi gönderdiği kesme Stopped olarak kayda geçer (Faz 2). `done` değerinin `idle` olması `agents()` içinde pencereye göre olur, bu yüzden çekirdek durumu kullanılır.
 
 ## 7. Gizli bilgi politikası
@@ -270,7 +291,8 @@ Gönderilmiş layout'lar salt okunur ve her başlangıçta yenilenir (risk 1). D
 2. `dcc herdr ensure-layout` kurulu `main` layout'unu okur, tarifi uygular ve `<app home>/layouts/dcc.json` yazar. Üretilen dosya hash'i ve kaynak `main` hash'i SQLite'ta kayıtlıdır.
 3. Başlangıçta ve `herdr-app --version` değişince yeniden üretir, `herdr-app status` ile hata olmadığını doğrular.
 4. Herdr sürümü sabitlenir (kabul edilen sürüm çifti listesi `compat.toml` içinde). Listede olmayan sürümde DCC "desteklenmeyen sürüm" uyarısı gösterir ve sözleşme testini çalıştırır.
-5. Modlar `dcc herdr ensure-mods` ile `<app home>/mods/` altına kopyalanır ve `herdr-app check` ile doğrulanır. Masaüstünde plugin install yoktur.
+5. Komut alan modlar yüklü olmalıdır. Yüklü olmayan bir mod için `herdr-app do <mod>.<komut>` "unknown command" hatası verir (Faz 0 test 2). Layout tarifi `dcc-code` gibi arka planda çalışacak modları bir bloğa ekler. `mod.open` ile elle açma çalıştı ama açık bir overlay kaydı bırakıyor, layout bloğu ile kalıcı yükleme sınanmadı.
+6. Modlar `dcc herdr ensure-mods` ile `<app home>/mods/` altına kopyalanır ve `herdr-app check` ile doğrulanır. Masaüstünde plugin install yoktur.
 
 Doğrulanmadı. Herdr'ın güncellemede app home'daki kullanıcı layout'larına dokunup dokunmadığı ve `layouts/.state` dosyasının anlamı.
 
@@ -296,6 +318,7 @@ Fixture programının Herdr tarafından agent olarak tanınması (program adı) 
 - SQLite meşgul olursa 5 sn bekler, sonra hata verir. Göç başarısız olursa yedeğe dönülür.
 - Job ölürse heartbeat bayatlar ve durum `dead` olur. `sweep` eski ve bitmiş klasörleri siler, çalışana dokunmaz.
 - Çekirdek yok veya beklenmedik sürüm ise DCC bunu gösterir. Çekirdek yalnızca `herdr core` komutuyla başlatılır, `hc server status` canlılık sınaması olarak kullanılmaz (risk 14). Kapanış PID ile doğrulanır.
+- Çekirdek soket yolu en fazla 103 bayt olabilir (Faz 0 test 5). Uzun `HC_SESSION` adı ve derin veri klasörü çekirdeğin başlamasını engeller, bu yüzden oturum adları ve XDG yolları kısa tutulur ve başlangıçta uzunluk denetlenir.
 - Hook ve statusline komutları hiçbir koşulda Claude Code'u bloklamaz. Ayrıştırma hatasında bile sıfır ile çıkar ve kendi hata satırını yazar.
 
 ## 11. Güvenlik modeli
@@ -353,9 +376,13 @@ dcc/
 
 ## 15. Doğrulanmayanlar
 
-- `claude --settings` ile hook ve statusline enjeksiyonu (Faz 0 test 1).
-- Lazygit ve neovim'in pane ve popup davranışı, kod sekmesi şablonunun geri yüklenmesi (Faz 0 test 2 ve 3).
-- SQLite oturum kaydı prototipi ve Stopped ile Failed ayrımı (Faz 0 test 4).
-- SSH port yönlendirme ve uzak makine bağlantısı (Faz 0 test 5).
-- Mod API'sinde olay akışı. Herdr API kararlılığı. Herdr masaüstü ve core lisansı.
-- `/clear` ve resume sonrası kimlik davranışı, Codex ve diğer agent'ların durum bildirimi, sır verme yolunun (askpass veya ortam) seçimi.
+Faz 0 sonuçları `docs/06-validation.md` içinde. Beş test geçti, geriye şunlar kaldı.
+
+- `--settings` ile hook ve statusline çalıştı, ama kullanıcının kendi ayar kaynağı ve hook'ları açıkken davranış denenmedi.
+- Gerçek Claude Code'un `hc run` ile açılması ve `SessionEnd` `reason` değerleri.
+- Popup modunun layout bloğuyla kalıcı yüklenmesi, neovim ve lazygit'in gerçek kullanımı.
+- Özel bölme oranlarının geri yüklenmesi, `space.close` davranışının tutarsızlığı.
+- Gerçek bir uzak makine, parolayla giriş, `ssh-agent`, SFTP.
+- Mod API'sinde olay akışı, Herdr API kararlılığı, Herdr masaüstü ve core lisansı.
+- Codex ve diğer agent'ların durum bildirimi, sır verme yolunun (askpass veya ortam) seçimi.
+- Windows (hiçbir şey sınanmadı).
