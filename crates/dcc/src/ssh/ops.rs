@@ -85,6 +85,46 @@ pub fn connect(
     )
 }
 
+/// Opens a tab whose terminal runs `dcc ssh profile secret <name>`, so the value is typed into a
+/// hidden prompt of a real terminal. A mod has no terminal of its own and must never see it.
+pub fn secret_tab(
+    store: &Store,
+    h: &dyn Herdr,
+    profile: &str,
+    exe: &Path,
+    data_dir: &Path,
+) -> Result<Value> {
+    let p = store.ssh_profile(profile)?;
+    if !p.auth.needs_secret() {
+        return Err(Error::usage("this profile has no secret"));
+    }
+    let tab = format!("secret {}", p.name);
+    let argv: Vec<String> = vec![
+        exe.to_string_lossy().into(),
+        "--data-dir".into(),
+        data_dir.to_string_lossy().into(),
+        "ssh".into(),
+        "profile".into(),
+        "secret".into(),
+        p.name.clone(),
+    ];
+    let placed = run_in_new_tab(
+        h,
+        &TabSpec {
+            space: SPACE,
+            tab_name: &tab,
+            cwd: &home(),
+            run_name: &format!("dcc-secret-{}", p.name),
+            extra_labels: &[],
+            argv: &argv,
+            what: "secret prompt",
+        },
+    )?;
+    Ok(
+        json!({ "profile": p.name, "terminal": placed.terminal, "tab": tab, "warnings": placed.warnings }),
+    )
+}
+
 /// Runs ssh in this process's terminal and returns its exit code. Started by the terminals that
 /// `connect` and `forward_start` open.
 pub fn run_session(
@@ -308,6 +348,25 @@ mod tests {
         assert_eq!(l[0].1[3..], ["ssh", "run", "prod"]);
         assert!(l[0].1.iter().all(|a| !a.contains("pw")));
         assert!(l[0].2.iter().any(|(k, v)| k == "dcc.ssh" && v == "prod"));
+    }
+
+    #[test]
+    fn the_secret_prompt_runs_in_a_terminal_of_its_own_and_carries_no_value() {
+        let (s, h, _b) = setup();
+        let exe = PathBuf::from("/x/dcc");
+        let r = secret_tab(&s, &h, "prod", &exe, &PathBuf::from("/x/data")).unwrap();
+        assert_eq!(r["tab"], "secret prod");
+        let l = h.launched();
+        assert_eq!(l[0].1[3..], ["ssh", "profile", "secret", "prod"]);
+        let mut k = profile();
+        k.name = "keyonly".into();
+        s.add_ssh_profile(&k).unwrap();
+        assert_eq!(
+            secret_tab(&s, &h, "keyonly", &exe, &PathBuf::from("/x/data"))
+                .unwrap_err()
+                .kind,
+            "usage"
+        );
     }
 
     #[test]

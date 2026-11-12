@@ -29,6 +29,20 @@
           "mod": "dcc-agents"
         }
       }
+    },
+    {
+      "into": "work-body",
+      "block": {
+        "id": "dcc-ssh",
+        "type": "block",
+        "size": {
+          "px": 360
+        },
+        "min": 280,
+        "content": {
+          "mod": "dcc-ssh"
+        }
+      }
     }
   ]
 }

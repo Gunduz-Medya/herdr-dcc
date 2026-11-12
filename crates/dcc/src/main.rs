@@ -90,6 +90,8 @@ enum SshAction {
         #[command(subcommand)]
         action: SshProfileAction,
     },
+    /// Everything the panel shows in one document (profiles, forwards with state, commands).
+    Overview,
     /// Open a tab with an ssh session for a profile.
     Connect { profile: String },
     Forward {
@@ -157,6 +159,10 @@ enum SshProfileAction {
     },
     /// Store the password or passphrase of a profile through a hidden prompt on a terminal.
     Secret {
+        name: String,
+    },
+    /// Open a tab with that hidden prompt (for the mod, which has no terminal).
+    SecretTab {
         name: String,
     },
 }
@@ -557,6 +563,13 @@ fn ssh_cmd(dir: &Option<PathBuf>, action: SshAction) -> Result<Value> {
                 let secret_removed = backend.delete(&p.secret_name())?;
                 Ok(json!({ "deleted": name, "secret_removed": secret_removed }))
             }
+            SshProfileAction::SecretTab { name } => ssh_ops::secret_tab(
+                &store,
+                &CliHerdr::new()?,
+                &name,
+                &std::env::current_exe()?,
+                &abs_data_dir(dir)?,
+            ),
             SshProfileAction::Secret { name } => {
                 let p = store.ssh_profile(&name)?;
                 if !p.auth.needs_secret() {
@@ -575,6 +588,26 @@ fn ssh_cmd(dir: &Option<PathBuf>, action: SshAction) -> Result<Value> {
                 Ok(json!({ "profile": name, "stored": true }))
             }
         },
+        SshAction::Overview => {
+            let profiles: Vec<Value> = store
+                .ssh_profiles()?
+                .iter()
+                .map(|p| profile_row(p, &backend))
+                .collect::<Result<_>>()?;
+            let (forwards, warning) =
+                match CliHerdr::new().and_then(|h| ssh_ops::forwards_status(&store, &h)) {
+                    Ok(v) => (v["forwards"].clone(), Value::Null),
+                    Err(e) => (json!([]), json!(e.message)),
+                };
+            let commands: Vec<Value> = store
+                .saved_commands()?
+                .iter()
+                .map(|c| json!({ "name": c.name, "command": c.command, "profile": c.profile }))
+                .collect();
+            Ok(
+                json!({ "profiles": profiles, "forwards": forwards, "commands": commands, "warning": warning }),
+            )
+        }
         SshAction::Connect { profile } => {
             let h = CliHerdr::new()?;
             ssh_ops::connect(
