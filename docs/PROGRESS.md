@@ -167,3 +167,32 @@ Kullanıcı dört panelin terminali kapattığını söyledi ve panellerin sağ 
   - Skillshare'in yedek geri yükleme akışı DCC'den çağrılmıyor, ekranda `skillshare restore` yazıyor.
   - Skillshare 0.30.2 ile denendi. Çıktı biçimi değişirse önizleme hata verir (JSON yoksa reddeder), yanlış sonuç vermez.
   - Gerçek kullanıcı ev klasöründe `apply` hiç çalıştırılmadı (kural gereği). Yalnızca gerçek Skillshare ile sahte ev klasöründe.
+
+## Faz 6, kullanım ve kota (2026-11-12, branch `phase-6-usage`)
+
+- Ne yapıldı.
+  - Göç v4, `usage_samples` tablosu. Yalnızca statusline'ın bildirdiği değerler, bildirildiği gibi. Hiçbir sayı hesaplanmıyor, tahmin edilmiyor veya başka alandan türetilmiyor.
+  - Kayıt. `agent statusline-log` komutu (Faz 2'den) artık `context_window.used_percentage` ve `rate_limits.five_hour`, `seven_day`, `spend_limit` içindeki `used_percentage` ile `resets_at` değerlerini yazıyor. Alan yoksa veya türü beklenmedikse satır yazılmıyor. `used_percentage` null ise satır NULL ile yazılıyor ve "bilinmiyor" anlamına geliyor. `resets_at` Claude Code belgesinde Unix epoch saniyesi olarak tanımlı (belge okundu), milisaniyeye çevriliyor. Aynı değer bir dakika içinde tekrar yazılmıyor, 30 günden eski örnekler siliniyor. Bağlam ve kota ayrı `kind` olarak tutuluyor.
+  - `dcc usage show` bağlamı açık çalıştırmalar için, kotayı hesap düzeyinde pencere pencere veriyor. Kaynağı olmayan her şey `unavailable` (DCC'nin başlatmadığı çalıştırma, Claude Code olmayan agent, henüz hiç bildirim gelmemiş oturum veya pencere). Bir kota örneğinin sıfırlanma zamanı geçmişse bu belirtiliyor, değer değiştirilmiyor. `dcc usage history` yalnızca DCC çalışırken toplanan örnekleri veriyor.
+  - `dcc-usage` modu (Context ve Account quota ayrı iki başlık, "Unavailable" ve "bilinmiyor" metinleri, 24 saatlik örneklerden blok çizgisi) ve tab çubuğunda "Usage" düğmesi (artık yedi panel düğmesi).
+  - Diğer agent'lar için resmi kaynak araştırması (sonuç aşağıda).
+- Test sonucu.
+  - `cargo test` 149 birim, 7 agent CLI, 8 CLI, 4 ssh CLI, 2 git CLI, 4 config CLI, 3 usage CLI, 3 xtask testi geçti. `cargo clippy --all-targets` temiz.
+  - Kabul 1 geçti. Bağlam ve kota ayrı başlıklar ve ayrı veri bölümleri (ekran görüntüsünde görüldü).
+  - Kabul 2 geçti. DCC'nin başlatmadığı çalıştırma (`hc run` ile açılan fixture) panelde ve verisinde Unavailable.
+  - Kabul 3 geçti. Kod incelemesi ve testi: `usage.rs` çalışan kısmı yalnızca `used_percentage` ve `resets_at` okuyor, token sayıları, pencere boyutu, maliyet ve `remaining_percentage` okunmuyor ve yüzde üzerinde aritmetik yok (kaynak taraması testi). Yüzdesi olmayan ama token alanları dolu bir belge hiç satır üretmedi (test).
+  - Kabul 4 geçti. `used_percentage` null iken veri `unknown`, panel "bilinmiyor" yazıyor (ekran görüntüsünde 7 day penceresi). Sonra sayı gelince değer görünüyor.
+  - Kabul 5 geçti. Gerçek hesapla etkileşim yok, tüm değerler elle üretilmiş örnek statusline belgeleriyle (`statusline-log` komutuna yazıldı) denendi.
+  - Canlı senaryo (izole Herdr). DCC'nin başlattığı fixture çalıştırmaya iki sentetik statusline belgesi verildi (önce null bağlam, sonra 31), panel Context 31% ve 5 hour 12.5% gösterdi. `dev-down` uygulama ve çekirdeği PID ile kapalı doğruladı.
+  - Sentetik değerler test verisidir, bir hesabın gerçek kotası değildir.
+- Diğer agent'lar için araştırma (2026-11-12).
+  - Codex CLI. Yerleşik durum çubuğu var (`/statusline`, `tui.status_line`), ama kullanıcı komutuna JSON veren bir hook belgelenmemiş (GitHub'da özellik isteği olarak duruyor). Kota için üçüncü taraf araçlar belgesiz bir ChatGPT arka uç uç noktasını okuyor, bu resmi kaynak değil. Karar: Unavailable.
+  - Gemini CLI. Belgelenmiş kullanıcı komutu hook'u bulunamadı. Google'ın Antigravity CLI'ının `statusLine` ayarı stdin'e JSON veriyor ama bu ayrı bir ürün ve şeması doğrulanmadı. Karar: Unavailable.
+  - Cursor. Özel statusLine komutundan söz ediliyor, JSON şeması belgelenmemiş. Karar: Unavailable.
+  - Hiçbiri koda alınmadı. Resmi ve belgeli bir kaynak çıkarsa o agent için adapter eklenir.
+- Açık sorun.
+  - Gerçek Claude Code oturumunun gerçek kota değerleri bu fazda görülmedi (gerçek hesap kotası harcar, kural gereği sorulmadan denenmedi). Alan adları ve türleri Faz 2'de gerçek oturumdan kaydedilen anahtar listesi ve resmi belgeyle uyuşuyor.
+  - `spend_limit` penceresi belgede var (Claude apps gateway), bu hesapla görülmedi. `used_usd` ve `limit_usd` bilerek alınmadı.
+  - Geçmiş görünümü yalnızca iki kota penceresini (5 hour, 7 day) çiziyor, bağlam geçmişi arayüzde yok (komutla alınabiliyor).
+  - Bir kota örneğinin `reset_passed` olduğu durumda yeni değer gelene kadar eski değer görünüyor, panel bunu kırmızı notla belirtiyor.
+  - Düğmeler ve panel tıklaması gerçek fareyle denenmedi.

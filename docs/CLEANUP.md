@@ -49,3 +49,7 @@ Faz 3 testlerinden kalanlar (silinmedi).
 
 Faz 5 testlerinden kalanlar (silinmedi).
 - `~/dev/dcc/.dev/ai-home` (sahte ev klasörü, Skillshare yapılandırması ve yedekleri dahil)
+
+Faz 6 testlerinden kalanlar (silinmedi).
+- `~/dev/dcc/.dev/p6-usage.png` ve `.dev/p5-*.png` ekran görüntüleri
+- `.dev/scratch-data` içindeki SQLite'ta sentetik `usage_samples` satırları
