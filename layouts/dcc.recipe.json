@@ -43,6 +43,20 @@
           "mod": "dcc-ssh"
         }
       }
+    },
+    {
+      "into": "work-body",
+      "block": {
+        "id": "dcc-code",
+        "type": "block",
+        "size": {
+          "px": 240
+        },
+        "min": 200,
+        "content": {
+          "mod": "dcc-code"
+        }
+      }
     }
   ]
 }

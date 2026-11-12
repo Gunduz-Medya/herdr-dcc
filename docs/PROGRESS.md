@@ -104,3 +104,27 @@ Her bölüm bir faz kaydıdır. Her kayıtta faz, tarih, ne yapıldı, test sonu
   - Askpass sunucusu çağıranı süreç kimliğiyle denetlemiyor (güvenli Rust ile olmuyor). ssh'in kendi başlattığı bir program (kullanıcı config'indeki ProxyCommand) nonce'u okuyabilir, sınırı üç cevap, yalnızca parola türü istem ve ssh çalıştığı süre. `askpass.rs` başında yazılı.
   - Profil güncelleme komutu yok (silip yeniden ekleniyor). Gizli giriş, `-F` dosyası ve `KnownHostsCommand` OpenSSH 8.5 ve üstü gerektiriyor.
   - Linux ve Windows'ta denenmedi, askpass Unix soketi ve `/dev/urandom` kullanıyor.
+
+## Faz 4, Git ve kod sekmesi (2026-11-12, branch `phase-4-git`)
+
+- Ne yapıldı.
+  - `dcc-code` modu. Küçük bir panel (odaktaki klasör, branch, worktree türü, değişen dosya sayısı, iki düğme) ve iki komut, `dcc-code.lazygit-popup` ve `dcc-code.code-tab`. Herdr bir modun komutlarını yalnızca mod yüklüyken tanıdığı için mod layout'ta panel olarak duruyor (`place` none yetmedi, komut "unknown" döndü).
+  - Popup. Odaktaki terminalin klasöründe `hc run --bg` ile lazygit başlatılıyor ve pencere overlay'inde gösteriliyor. Terminal adı her seferinde benzersiz (aynı ad ikinci popup'ı engelliyordu, canlı testte görüldü).
+  - Kod sekmesi. `code` şablonu (Faz 1'den) odaktaki klasörle `dcc workspace template apply` üzerinden açılıyor.
+  - `dcc git tools` neovim ve lazygit'in kurulu olup olmadığını söylüyor, eksikse kurulum komutunu gösteriyor. DCC bir şey kurmuyor.
+  - Worktree komutları (`add`, `list`, `remove --confirm`) ve git bilgisi (`dcc git info`) Faz 2'den geliyor, aynı kod agent paneli ve `dcc-code` panelinde ortak. Bu fazda bunlar için CLI entegrasyon testi eklendi.
+  - DCC içinde diff, stage veya commit arayüzü yok, hepsi lazygit'te.
+- Test sonucu.
+  - `cargo test` 126 birim, 7 agent CLI, 8 CLI, 4 ssh CLI, 2 git CLI, 3 xtask testi geçti. `cargo clippy --all-targets` temiz.
+  - Canlı senaryo (izole Herdr).
+    1. Kabul 1 geçti. Mod komutuyla kod sekmesi açıldı (üç pane, `nvim`, `lazygit`, shell), space kapatılıp (üç terminal sonlandırıldı) `restore` edildi, aynı sekme ve pane düzeni geldi, startup komutları yazıldı. Bölme oranları yaklaşık (Faz 1'deki sınır).
+    2. Kabul 2 geçti. `t2-repo` space'i odaktayken popup lazygit'i `main` branch'iyle, `t2-repo-b` odaktayken `feature/popup-b` ile açtı (terminal klasörü ve lazygit ekranı doğrulandı).
+    3. Kabul 3 geçti. Worktree oluşturma, listeleme ve linked worktree bilgisi CLI testinde, silme `--confirm` olmadan reddedildi.
+    4. Kabul 4 geçti (mod ve Rust kodunda diff, stage veya commit yok).
+  - `dev-down` uygulama ve çekirdeği PID ile kapalı doğruladı.
+- Açık sorun.
+  - "Bir tuşla" kısmı. Komutlar `herdr-app do` ile çalışıyor ama bir tuşa bağlamadım. Bunun için Herdr'ın tuş ayarını yazmak gerekir (yapılandırma yazma kuralı, yedek ve fark önizlemesi ister), kullanıcıya bırakıldı.
+  - Overlay'in ekranda görüldüğü gözle doğrulanamadı (pencere ekran görüntüsüne gelmiyor, erişilebilirlik izni yok). Doğrulama terminal, klasör ve lazygit ekran metniyle yapıldı.
+  - Düğmelere tıklanmadı, komutlar `herdr-app do` ile çağrıldı. Düğme eylemi aynı fonksiyonları çağırıyor.
+  - Layout'ta artık dört panel var (340, 360, 360, 240 px). Küçük ekranda terminale az yer kalır, genişlikler ayarlanmalı veya paneller ayrı layout'lara bölünmeli (ürün kararı, bekliyor).
+  - Neovim ve lazygit'in gerçek kullanımı (düzenleme, commit, rebase) denenmedi.
