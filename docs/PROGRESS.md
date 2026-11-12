@@ -128,3 +128,19 @@ Her bölüm bir faz kaydıdır. Her kayıtta faz, tarih, ne yapıldı, test sonu
   - Düğmelere tıklanmadı, komutlar `herdr-app do` ile çağrıldı. Düğme eylemi aynı fonksiyonları çağırıyor.
   - Layout'ta artık dört panel var (340, 360, 360, 240 px). Küçük ekranda terminale az yer kalır, genişlikler ayarlanmalı veya paneller ayrı layout'lara bölünmeli (ürün kararı, bekliyor).
   - Neovim ve lazygit'in gerçek kullanımı (düzenleme, commit, rebase) denenmedi.
+
+### Faz 4 eki, paneller tab çubuğunda (2026-11-12, branch `phase-4-git`)
+
+Kullanıcı dört panelin terminali kapattığını söyledi ve panellerin sağ üstte `+` işaretinin sağında sekme gibi açılıp kapanmasını istedi. Bu iş Faz 4 branch'ine commit'lendi (kullanıcı "sonraki faza ekle" dedi, ama Faz 5 branch'i henüz açılmamıştı, taşımak geçmişi yeniden yazmak olurdu).
+
+- Ne yapıldı.
+  - DCC panelleri artık Herdr'ın kendi yan paneline (`panel-body` yığını, Files ve Changes ile aynı yer) giriyor. Aynı anda tek panel açık, kapalıyken terminal tam genişlikte. Düğmeler (Workspaces, Agents, SSH, Code) tab çubuğunda `+` ve Files, Changes düğmelerinin sağında, açık olan vurgulu, ikinci tık kapatıyor.
+  - Tab çubuğu Herdr'ın salt okunur `tabs` modundan türetiliyor, kaynağı repoda yok. `dcc herdr ensure-tabs` kurulu `tabs` modunu okuyor, üç tam eşleşmeli metin değişikliği yapıp `dcc-tabs` olarak yazıyor. Bir eşleşme tutmazsa (Herdr sürümü değişirse) hiçbir şey yazılmıyor ve komut hata veriyor.
+  - Layout tarifine `set` eklendi (var olan düğümün alanını değiştirir). Tarif `tabs` bloğunu `dcc-tabs` yapıyor ve DCC bloklarını `panel-body` içine koyuyor. Kurulum sırası `ensure-mods`, `ensure-tabs`, `ensure-layout`.
+- Test sonucu.
+  - `cargo test` 130 birim, 7 agent CLI, 8 CLI, 2 git CLI, 4 ssh CLI, 3 xtask testi geçti. `cargo clippy --all-targets` temiz.
+  - Canlı doğrulama `herdr-app shot` ile ekran görüntüsü alınarak yapıldı (Agents, SSH ve Code panelleri açıldı, düğme vurgulandı, kapatınca terminal tam genişliğe döndü). `layout.select` ve `layout.show` komutları düğmelerin çağırdığıyla aynı.
+  - Bu görüntüler Faz 2 ve 3 için açık kalan "panel gözle doğrulanmadı" maddesini de kapatıyor (Agents ve SSH panelleri görüldü). Workspaces paneli görüntüsü alındı ama incelenmedi. Düğmelere gerçek fare tıklaması yapılmadı.
+- Açık sorun.
+  - `herdr-app shot` Herdr'ın son kare görüntüsünü veriyor, `screencapture` yerine bunu kullanmak gerekiyor.
+  - Bir panel açıkken diğer panel görünmüyor, yan yana iki DCC paneli gösterilemez. Panel genişliği Herdr'ın `panel` düğümünden geliyor (min 280).
