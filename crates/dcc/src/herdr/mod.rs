@@ -8,4 +8,5 @@ pub mod fake;
 pub mod isolation;
 pub mod layout;
 pub mod mods;
+pub mod tabbar;
 pub mod tabs;

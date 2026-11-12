@@ -317,6 +317,11 @@ enum HerdrAction {
         #[arg(long)]
         no_check: bool,
     },
+    /// Write the DCC tab bar (the installed tabs mod plus a button for each DCC panel).
+    EnsureTabs {
+        #[arg(long, default_value = "assets/tab-icons")]
+        icons: PathBuf,
+    },
     /// Core life cycle. Verification is by process id.
     Core {
         #[command(subcommand)]
@@ -852,6 +857,7 @@ fn herdr_cmd(dir: &Option<PathBuf>, action: HerdrAction) -> Result<Value> {
             let config = json!({ "dcc": exe.to_string_lossy(), "data_dir": data.map(|d| d.to_string_lossy().to_string()) });
             mods::ensure(&src, &app_home()?, !no_check, Some(&config))
         }
+        HerdrAction::EnsureTabs { icons } => dcc::herdr::tabbar::ensure(&app_home()?, &icons),
         HerdrAction::Core { action } => match action {
             CoreAction::Pids => Ok(json!({ "pids": core::pids()? })),
             CoreAction::Start => core::start(),

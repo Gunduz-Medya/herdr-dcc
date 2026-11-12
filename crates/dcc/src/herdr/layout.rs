@@ -3,7 +3,9 @@
 //! `<app home>/layouts/<name>.json`. It is rebuilt whenever the shipped layout, the recipe or the
 //! Herdr app version changes (their hashes are kept in the database).
 //!
-//! Recipe: `{ "name": "dcc", "base": "main", "insert": [ { "into": "<block id>", "block": {..} } ] }`.
+//! Recipe: `{ "name": "dcc", "base": "main", "insert": [ { "into": "<block id>", "block": {..} } ],
+//! "set": [ { "id": "<node id>", "fields": {..} } ] }`. `set` replaces fields of an existing node,
+//! for example the mod a block shows.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -60,6 +62,30 @@ pub fn apply(base: &Value, recipe: &Value, app_version: &str) -> Result<Value> {
             children.retain(|c| c.get("id").and_then(Value::as_str) != Some(id.as_str()));
         }
         children.push(block);
+    }
+    for set in recipe
+        .get("set")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+    {
+        let id = set
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::usage("set without an id"))?;
+        let fields = set
+            .get("fields")
+            .and_then(Value::as_object)
+            .ok_or_else(|| Error::usage("set without fields"))?;
+        let node = find_mut(&mut out, id)
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| Error::not_found(format!("the base layout has no node with id {id}")))?;
+        for (k, v) in fields {
+            if k == "id" || k == "children" {
+                return Err(Error::usage("set cannot change id or children"));
+            }
+            node.insert(k.clone(), v.clone());
+        }
     }
     let obj = out
         .as_object_mut()
@@ -165,6 +191,17 @@ mod tests {
 
     fn recipe() -> Value {
         json!({"name":"dcc","base":"main","insert":[{"into":"work","block":{"id":"dcc-workspace","type":"block","content":{"mod":"dcc-workspace"}}}]})
+    }
+
+    #[test]
+    fn set_replaces_fields_of_an_existing_node_and_refuses_unknown_ones() {
+        let r = json!({"name":"dcc","set":[{"id":"files","fields":{"content":{"mod":"other"}}}]});
+        let out = apply(&base(), &r, "1").unwrap();
+        assert_eq!(out["children"][0]["children"][0]["content"]["mod"], "other");
+        let missing = json!({"name":"dcc","set":[{"id":"nope","fields":{"x":1}}]});
+        assert_eq!(apply(&base(), &missing, "1").unwrap_err().kind, "not_found");
+        let forbidden = json!({"name":"dcc","set":[{"id":"files","fields":{"children":[]}}]});
+        assert_eq!(apply(&base(), &forbidden, "1").unwrap_err().kind, "usage");
     }
 
     #[test]

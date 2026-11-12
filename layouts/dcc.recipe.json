@@ -3,58 +3,52 @@
   "base": "main",
   "insert": [
     {
-      "into": "work-body",
+      "into": "panel-body",
       "block": {
         "id": "dcc-workspace",
         "type": "block",
-        "size": {
-          "px": 340
-        },
-        "min": 260,
         "content": {
           "mod": "dcc-workspace"
         }
       }
     },
     {
-      "into": "work-body",
+      "into": "panel-body",
       "block": {
         "id": "dcc-agents",
         "type": "block",
-        "size": {
-          "px": 360
-        },
-        "min": 280,
         "content": {
           "mod": "dcc-agents"
         }
       }
     },
     {
-      "into": "work-body",
+      "into": "panel-body",
       "block": {
         "id": "dcc-ssh",
         "type": "block",
-        "size": {
-          "px": 360
-        },
-        "min": 280,
         "content": {
           "mod": "dcc-ssh"
         }
       }
     },
     {
-      "into": "work-body",
+      "into": "panel-body",
       "block": {
         "id": "dcc-code",
         "type": "block",
-        "size": {
-          "px": 240
-        },
-        "min": 200,
         "content": {
           "mod": "dcc-code"
+        }
+      }
+    }
+  ],
+  "set": [
+    {
+      "id": "tabs",
+      "fields": {
+        "content": {
+          "mod": "dcc-tabs"
         }
       }
     }
