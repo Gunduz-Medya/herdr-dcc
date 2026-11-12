@@ -196,3 +196,18 @@ Kullanıcı dört panelin terminali kapattığını söyledi ve panellerin sağ 
   - Geçmiş görünümü yalnızca iki kota penceresini (5 hour, 7 day) çiziyor, bağlam geçmişi arayüzde yok (komutla alınabiliyor).
   - Bir kota örneğinin `reset_passed` olduğu durumda yeni değer gelene kadar eski değer görünüyor, panel bunu kırmızı notla belirtiyor.
   - Düğmeler ve panel tıklaması gerçek fareyle denenmedi.
+
+## Kurulum yardımcısı (2026-11-12, branch `install-dry-run`)
+
+- Ne yapıldı.
+  - `dcc herdr install` varsayılan olarak kuru çalıştırma (neyi oluşturacağını ve neyi değiştireceğini gösterir, hiçbir şey yazmaz). `--apply` ile önce değiştireceği her dosyayı `<veri klasörü>/backups/<kimlik>/` altına manifestle yedekler, yedek başarısızsa hiçbir şey yazmaz, sonra yalnızca `mods/dcc-*` ve `layouts/dcc.json` yazar. Katman seçilmez, kullanıcı seçer. Önkoşullar (kurulu `tabs` modu yamaya uyuyor mu, `main` layout var mı, Herdr sürüm çifti) sorun varsa kurulum hiç başlamaz.
+  - `dcc herdr uninstall --backup <kimlik>` varsayılan olarak yalnızca listeler. `--confirm` ile kurulumun oluşturduğunu siler, değiştirdiğini yedekten geri koyar. Yedek manifestinde `mods/dcc-` veya `layouts/` dışına çıkan yol reddediliyor.
+  - Varsayılan veri klasörü `~/.config/herdr-dcc` (Herdr'ın `~/.config/herdr-app` klasörünün yanında). Geliştirme ortamında (`DCC_REQUIRE_ISOLATION=1`) varsayılan yok, gerçek klasöre düşmek mümkün değil.
+- Test sonucu.
+  - `cargo test` yeni 6 birim testiyle geçti, `cargo clippy --all-targets` temiz.
+  - Canlı denemeler yalıtılmış Herdr kopyalarında yapıldı. Temiz bir ayar klasörü kopyasında kuru çalıştırma hiçbir dosyayı değiştirmedi, `--apply` yedekle birlikte 8 öğe oluşturdu ve mod kontrolleri geçti, ikinci kurulum "replace" olarak yedek aldı, `uninstall` önce listeledi sonra `--confirm` ile DCC dosyalarını kaldırdı, Herdr ayar dosyaları ve diğer modlar aynı kaldı. Çalışan yalıtılmış Herdr'a `--apply` ile kurulup `layout.switch` ile geçildi, `herdr-app status` hatasız ve paneller ekran görüntüsünde göründü.
+  - Gerçek `~/.config/herdr-app` ve `~/.config/herdr-dcc` bu fazda hiç açılmadı, yazılmadı.
+- Açık sorun.
+  - Gerçek Herdr'a hiç kurulmadı. Kuru çalıştırma da gerçek klasöre karşı koşturulmadı (kullanıcı onayıyla yapılacak).
+  - Yedek yalnızca değiştirilen DCC dosyalarını kapsıyor. Herdr'ın kendi ayarları DCC tarafından değiştirilmediği için yedeklenmiyor.
+  - Kurulumun yazdığı `config.json` dosyaları o anki `dcc` ikilisinin yolunu içeriyor, ikili taşınırsa `install --apply` yeniden çalıştırılmalı.

@@ -75,15 +75,23 @@ Tests never touch a real Herdr or your real `~/.claude`. Tests that need Skillsh
 
 ## Install into Herdr
 
-The helper prints JSON for every command (`dcc --help`) and needs a data folder (`--data-dir` or `DCC_DATA_DIR`). These three steps write into Herdr's app home, so read `docs/PROGRESS.md` first. A dry-run and backup wrapper is the next planned step.
+Herdr keeps its settings, mods and layouts in `~/.config/herdr-app` (its app home). DCC keeps its own data (SQLite file, jobs, backups) in `~/.config/herdr-dcc`, or wherever `--data-dir` or `DCC_DATA_DIR` points. All `dcc` commands print JSON, see `dcc --help`.
 
 ```sh
-dcc herdr ensure-mods        # copy the panels
-dcc herdr ensure-tabs        # build the tab bar with the panel buttons
-dcc herdr ensure-layout --recipe layouts/dcc.recipe.json
+dcc herdr install             # dry run: shows what would be created or replaced, writes nothing
+dcc herdr install --apply     # backs up every file it replaces, then installs
+dcc herdr uninstall --backup <id>             # lists what an undo would do
+dcc herdr uninstall --backup <id> --confirm   # removes what the install created, restores what it replaced
 ```
 
-The tab bar is derived at install time from the `tabs` mod you already have installed. No Herdr code is shipped in this repository.
+What an install does and does not do.
+
+- It writes only the DCC mods (`mods/dcc-*`) and the DCC layout (`layouts/dcc.json`) into the app home. Your Herdr settings, other mods and other layouts are not touched.
+- Before writing it copies each file it is about to replace into `<data folder>/backups/<id>/` with a manifest. If a backup fails, nothing is written.
+- It does not switch your layout. Pick `dcc` yourself (ctrl-shift-l cycles layouts), and switch back to `main` any time.
+- The tab bar is derived at install time from the `tabs` mod you already have. If a Herdr update changes that file, the install stops with a clear message instead of writing a broken bar. No Herdr code is shipped in this repository.
+
+Run `dcc` from this repository so the default `mods`, `assets` and `layouts` paths resolve, and build a release binary first (`cargo build --release`), because the panels remember the path of the `dcc` binary that installed them.
 
 ## Repository layout
 
