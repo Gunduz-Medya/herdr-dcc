@@ -64,8 +64,14 @@ fn worktree_path(repo_root: &str, short: &str) -> PathBuf {
 
 pub fn launch(store: &Store, h: &dyn Herdr, p: &LaunchParams, now_ms: i64) -> Result<Value> {
     let repo = p.repo.to_string_lossy().to_string();
-    let info =
-        git::info(&repo).ok_or_else(|| Error::usage(format!("{repo} is not a git repository")))?;
+    // A folder that is not a git repository can host an agent in place (worktree off), the panel
+    // then shows no branch. A separate worktree needs git.
+    let info = git::info(&repo);
+    if info.is_none() && p.worktree == WorktreeMode::Auto {
+        return Err(Error::usage(format!(
+            "{repo} is not a git repository, a separate worktree needs one (start the agent without it)"
+        )));
+    }
     let run_id = new_uuid();
     let short = run_id[..8].to_string();
     let program = match &p.program {
@@ -75,8 +81,15 @@ pub fn launch(store: &Store, h: &dyn Herdr, p: &LaunchParams, now_ms: i64) -> Re
     };
 
     let (cwd, worktree_path_used, branch) = match p.worktree {
-        WorktreeMode::Off => (repo.clone(), None, info.branch.clone()),
+        WorktreeMode::Off => (
+            repo.clone(),
+            None,
+            info.as_ref().and_then(|i| i.branch.clone()),
+        ),
         WorktreeMode::Auto => {
+            let info = info
+                .as_ref()
+                .ok_or_else(|| Error::usage("not a git repository"))?;
             let branch = p.branch.clone().unwrap_or_else(|| format!("dcc/{short}"));
             let path = worktree_path(&info.repo_root, &short);
             git::worktree_add(&info.repo_root, &branch, &path)?;
@@ -120,16 +133,15 @@ pub fn launch(store: &Store, h: &dyn Herdr, p: &LaunchParams, now_ms: i64) -> Re
         last_state: DccState::Unknown.as_str().into(),
         last_state_ms: now_ms,
         cwd: Some(cwd.clone()),
-        repo_root: Some(info.repo_root.clone()),
+        repo_root: info.as_ref().map(|i| i.repo_root.clone()),
         branch,
-        worktree_kind: Some(
+        worktree_kind: info.as_ref().map(|i| {
             if worktree_path_used.is_some() {
-                "linked"
+                "linked".to_string()
             } else {
-                info.worktree_kind()
+                i.worktree_kind().to_string()
             }
-            .into(),
-        ),
+        }),
         worktree_path: worktree_path_used.clone(),
         herdr_session: p.herdr_session.clone(),
         space_name: Some(p.space.clone()),
@@ -196,6 +208,29 @@ mod tests {
             data_dir: data.to_path_buf(),
             herdr_session: Some("t".into()),
         }
+    }
+
+    #[test]
+    fn a_folder_without_git_hosts_an_agent_in_place_but_not_a_worktree() {
+        // the scratch folders of the tests sit inside this repository, so use the system temp folder
+        let dir = std::env::temp_dir().join(format!("dcc-nogit-{}", new_uuid()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let data = scratch_dir("launch-nogit-data");
+        let store = Store::open_in_memory().unwrap();
+        let h = FakeHerdr::new();
+        let r = launch(&store, &h, &params(&dir, &data, WorktreeMode::Off), 1000).unwrap();
+        let run = store.run(r["run_id"].as_str().unwrap()).unwrap().unwrap();
+        assert_eq!(
+            (run.branch, run.repo_root, run.worktree_kind),
+            (None, None, None)
+        );
+        assert_eq!(run.cwd.as_deref(), Some(dir.to_string_lossy().as_ref()));
+        assert_eq!(h.launched().len(), 1);
+        let e = launch(&store, &h, &params(&dir, &data, WorktreeMode::Auto), 1000).unwrap_err();
+        assert_eq!(e.kind, "usage");
+        assert!(e.message.contains("separate worktree needs one"));
+        assert_eq!(h.launched().len(), 1, "a refused launch starts nothing");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

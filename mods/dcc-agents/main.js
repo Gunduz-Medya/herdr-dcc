@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, exec, appHome, readTextFile } from "herdr";
+import { theme, exec, appHome, readTextFile, focused } from "herdr";
 
 // Read only agent panel. Everything comes from `dcc agent snapshot`: the core (status, exit code),
 // git (branch, worktree, changes) and the records DCC keeps (sessions, last hook, ended runs).
@@ -34,6 +34,12 @@ function ago(ms, now) {
   return `${Math.floor(s / 3600)}h ago`;
 }
 
+function button(t, id, label, onClick, on = false) {
+  return div().id(id).px(8).py(4).rounded(6).border(1).border_color(t.border).bg(on ? t.selected : t.surface)
+    .hover((st) => st.bg(t.raised)).text_color(t.foreground).text_size(12)
+    .on_click(onClick).child(label);
+}
+
 const heading = (t, text) => div().text_size(11).font_semibold().text_color(t.muted).child(text);
 
 export default class DccAgents extends View {
@@ -43,6 +49,9 @@ export default class DccAgents extends View {
     this.err = null;
     this.busy = false;
     this.lastShown = "";
+    this.worktree = false;   // "separate worktree" box of the New agent button
+    this.launching = false;
+    this.launchNote = null;
     this.updated = null;
     this.stats = { last: null, max: 0, sum: 0, n: 0 };
     cx.spawn(async (cx) => {
@@ -81,8 +90,35 @@ export default class DccAgents extends View {
       this.busy = false;
       this.err = err;
       const now = Date.now();
-      const sig = JSON.stringify([this.doc?.runs?.map((x) => [x.run_id, x.dcc_state, x.herdr_status, x.session_id, x.session_count, x.git?.branch, x.git?.worktree_kind, x.git?.changed_files, x.git?.staged, x.git?.unstaged, x.git?.untracked, x.last_event, x.shared_folder, Math.floor((now - (x.last_event_ms ?? now)) / 5000)]), this.doc?.warnings, this.doc?.status_reliable, err, this.stats.last]);
+      const sig = JSON.stringify([this.doc?.runs?.map((x) => [x.run_id, x.dcc_state, x.herdr_status, x.session_id, x.session_count, x.git?.branch, x.git?.worktree_kind, x.git?.changed_files, x.git?.staged, x.git?.unstaged, x.git?.untracked, x.last_event, x.shared_folder, Math.floor((now - (x.last_event_ms ?? now)) / 5000)]), this.doc?.warnings, this.doc?.status_reliable, err, this.stats.last, this.launchNote, this.worktree]);
       if (sig !== this.lastShown) { this.lastShown = sig; cx.notify(); }
+    });
+  }
+
+  // Starts Claude Code through DCC in the folder of the focused terminal, in a tab of its own.
+  // This is `dcc agent launch`, the same thing as typing it.
+  launchAgent(cx) {
+    if (!this.cfg || this.launching) return;
+    const cwd = focused()?.cwd ?? null;
+    if (!cwd) { this.launchNote = "no focused folder, click a terminal first"; cx.notify(); return; }
+    this.launching = true;
+    this.launchNote = "starting...";
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        const r = await exec(this.cfg.dcc, ["--data-dir", this.cfg.data_dir, "agent", "launch", "--repo", String(cwd), "--worktree", this.worktree ? "auto" : "off"], { timeout: 25000 });
+        if (r.code === 0) {
+          const o = JSON.parse(r.stdout);
+          this.launchNote = `started ${String(o.run_id).slice(0, 8)} in ${o.tab}${o.warnings?.length ? `, ${o.warnings[0]}` : ""}`;
+        } else {
+          let msg = `exit ${r.code}`;
+          try { const e = JSON.parse(r.stderr).error; msg = `${e.kind}: ${e.message}`; } catch (_e) { /* keep exit code */ }
+          this.launchNote = msg.slice(0, 160);
+        }
+      } catch (e) { this.launchNote = `launch failed, ${String(e?.message ?? e).slice(0, 100)}`; }
+      this.launching = false;
+      this.refresh(cx);
+      cx.notify();
     });
   }
 
@@ -125,7 +161,11 @@ export default class DccAgents extends View {
     const t = theme();
     const now = Date.now();
     let body = v_flex().id("dcc-agents-body").flex_1().min_h(0).overflow_y_scrollbar().p(12).gap(8).text_size(12)
-      .child(div().text_size(15).font_semibold().text_color(t.foreground).child("DCC agents"));
+      .child(div().text_size(15).font_semibold().text_color(t.foreground).child("DCC agents"))
+      .child(h_flex().gap(8).items_center()
+        .child(button(t, "new-agent", this.launching ? "Starting..." : "+ New agent", (_e, cx) => this.launchAgent(cx)))
+        .child(button(t, "wt-box", this.worktree ? "[x] own worktree" : "[ ] own worktree", (_e, cx) => { this.worktree = !this.worktree; cx.notify(); }, this.worktree)))
+      .children(this.launchNote ? [div().text_color(t.muted).child(this.launchNote)] : []);
     if (this.err) body = body.child(div().text_color(t.blocked).child(this.err));
     for (const w of this.doc?.warnings ?? []) body = body.child(div().text_color(t.blocked).child(w));
     if (this.doc === null && !this.err) {

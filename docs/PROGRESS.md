@@ -234,3 +234,10 @@ Kullanıcı dört panelin terminali kapattığını söyledi ve panellerin sağ 
 - Açık sorun. Bu satır kullanıcının kendi status line'ının renklerini ve ek alanlarını (git branch vb.) içermiyor. Kendi komutuna zincirleme yönlendirme ayrı bir karar (kullanıcının `~/.claude/settings.json` içeriğini okumayı gerektirir), yapılmadı.
 
 Ek (renkler, branch `statusline-colors`). Alt çubuk düz metin olarak çiziliyordu, Claude Code renkleri komutun çıktısındaki ANSI kodlarından alıyor. Satır artık renkli. Klasör mavi, model beyaz, etiketler (`ctx`, `5h`, `7d`) gri, sayı yeşil (50'nin altı), sarı (80'in altı), kırmızı (80 ve üstü), sayı yoksa gri. Eşikler yalnızca renk seçimi için bir görüntü tercihidir, bildirilen sayıdan başka hiçbir şey türetilmiyor. Kullanıcının kendi çubuğunun renk düzeni bilinmediği için birebir aynı değil.
+
+## Değişiklik, Yeni agent düğmesi (2026-11-13, branch `new-agent-button`)
+
+- İstek. Panelden DCC ile agent başlatabilmek (komut yazmadan).
+- Yapılan. Agents panelinin üstüne "+ New agent" düğmesi ve "own worktree" kutusu eklendi. Düğme odaktaki terminalin klasöründe `dcc agent launch` komutunu çalıştırıyor (kutu işaretliyse `--worktree auto`, değilse `off`) ve sonucu panelde yazıyor. Ayrıca `agent launch` artık git deposu olmayan klasörlerde (worktree kapalıyken) çalışıyor, panel o satırda branch göstermiyor. Ayrı worktree git deposu gerektiriyor ve yoksa anlaşılır bir hata veriyor, hiçbir şey başlatılmıyor.
+- Test. Yeni birim testi (git olmayan klasör, kapalı worktree başlar, açık worktree reddedilir ve hiçbir şey başlatmaz), tüm testler ve clippy temiz. Yalıtılmış Herdr'da düğme ve kutu panelde görüldü.
+- Açık sorun. Düğmeye gerçek fare tıklaması yapılmadı, komut ve mantık CLI ile denendi. Düğme gerçek bir Claude başlatır (kota harcamaz ama klasör güven ve izin soruları gelir). Odak bir terminalde değilse "no focused folder" yazıyor.
