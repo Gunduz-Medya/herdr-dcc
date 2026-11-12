@@ -41,6 +41,16 @@
           "mod": "dcc-code"
         }
       }
+    },
+    {
+      "into": "panel-body",
+      "block": {
+        "id": "dcc-config",
+        "type": "block",
+        "content": {
+          "mod": "dcc-config"
+        }
+      }
     }
   ],
   "set": [

@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use dcc::agent::launch::{LaunchParams, WorktreeMode};
 use dcc::agent::record::{CliSource, RecordOptions};
 use dcc::agent::{contract, exec, hooks, launch, record, statusline};
+use dcc::config::{inventory, skillshare};
 use dcc::herdr::api::{CliHerdr, Herdr};
 use dcc::herdr::{compat, core, isolation, layout, mods};
 use dcc::secret::{KeyringBackend, SERVICE, SecretBackend, set_with};
@@ -58,6 +59,14 @@ enum Command {
         #[command(subcommand)]
         action: AgentAction,
     },
+    /// AI tool configuration, read only, and Skillshare calls.
+    Config {
+        /// The home the AI tool configuration is read from. Also read from DCC_AI_HOME.
+        #[arg(long, env = "DCC_AI_HOME")]
+        home: Option<PathBuf>,
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
     /// SSH profiles, port forwards and saved commands.
     Ssh {
         #[command(subcommand)]
@@ -77,6 +86,41 @@ enum Command {
     Debug {
         #[command(subcommand)]
         action: DebugAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Files of the AI tool configuration (path, kind, size). No file is opened.
+    Inventory,
+    /// Skillshare as it is set up.
+    Skillshare {
+        #[command(subcommand)]
+        action: SkillshareAction,
+    },
+    Sync {
+        #[command(subcommand)]
+        action: ConfigSyncAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum SkillshareAction {
+    Status,
+    List,
+}
+
+#[derive(Subcommand)]
+enum ConfigSyncAction {
+    /// What a sync would do and the hash of that. Writes nothing.
+    Preview,
+    /// Back up the targets, then sync. Needs the hash of a preview. Run it as a job, it can take long.
+    Apply {
+        #[arg(long)]
+        preview_hash: String,
+        /// Approve removals separately.
+        #[arg(long)]
+        allow_delete: bool,
     },
 }
 
@@ -502,6 +546,49 @@ fn secret(action: SecretAction) -> Result<Value> {
     }
 }
 
+/// The home the AI tool configuration is read from. `DCC_AI_HOME` picks another one. When isolation
+/// is required (development) it must be set, so a test run never reaches the real home.
+fn ai_home(given: Option<PathBuf>) -> Result<PathBuf> {
+    if let Some(h) = given {
+        return Ok(h);
+    }
+    if isolation::required() {
+        return Err(Error::isolation(
+            "DCC_AI_HOME must point at a scratch home when isolation is required",
+        ));
+    }
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| Error::usage("HOME is not set"))
+}
+
+fn config_cmd(dir: &Option<PathBuf>, home: Option<PathBuf>, action: ConfigAction) -> Result<Value> {
+    let home = ai_home(home)?;
+    match action {
+        ConfigAction::Inventory => Ok(inventory::scan(&home)),
+        ConfigAction::Skillshare { action } => {
+            let r = skillshare::CliRunner::new(home)?;
+            match action {
+                SkillshareAction::Status => skillshare::status(&r),
+                SkillshareAction::List => skillshare::list(&r),
+            }
+        }
+        ConfigAction::Sync { action } => {
+            let r = skillshare::CliRunner::new(home)?;
+            match action {
+                ConfigSyncAction::Preview => skillshare::preview(&r),
+                ConfigSyncAction::Apply {
+                    preview_hash,
+                    allow_delete,
+                } => {
+                    let store = Store::open(&data_dir(dir)?)?;
+                    skillshare::apply(&r, &store, &preview_hash, allow_delete)
+                }
+            }
+        }
+    }
+}
+
 fn split_target(t: &str) -> Result<(String, u16)> {
     let (host, port) = t
         .rsplit_once(':')
@@ -854,7 +941,8 @@ fn herdr_cmd(dir: &Option<PathBuf>, action: HerdrAction) -> Result<Value> {
         HerdrAction::EnsureMods { src, no_check } => {
             let exe = std::env::current_exe()?;
             let data = data_dir(dir).ok().map(|d| d.canonicalize().unwrap_or(d));
-            let config = json!({ "dcc": exe.to_string_lossy(), "data_dir": data.map(|d| d.to_string_lossy().to_string()) });
+            let ai_home = std::env::var("DCC_AI_HOME").ok();
+            let config = json!({ "dcc": exe.to_string_lossy(), "data_dir": data.map(|d| d.to_string_lossy().to_string()), "ai_home": ai_home });
             mods::ensure(&src, &app_home()?, !no_check, Some(&config))
         }
         HerdrAction::EnsureTabs { icons } => dcc::herdr::tabbar::ensure(&app_home()?, &icons),
@@ -1117,6 +1205,7 @@ fn main() -> ExitCode {
             };
         }
         Command::Ssh { action } => ssh_cmd(&dir, action),
+        Command::Config { home, action } => config_cmd(&dir, home, action),
         Command::Secret { action } => secret(action),
         Command::Workspace { action } => workspace(&dir, action),
         Command::Job { action } => data_dir(&dir).and_then(|d| match action {

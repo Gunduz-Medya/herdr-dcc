@@ -1,6 +1,7 @@
 //! DCC companion library. The `dcc` binary is a thin command line over these modules.
 
 pub mod agent;
+pub mod config;
 pub mod error;
 pub mod git;
 pub mod herdr;

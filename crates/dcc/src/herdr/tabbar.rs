@@ -21,6 +21,7 @@ pub const PANELS: &[(&str, &str, &str)] = &[
     ("dcc-agents", "Agents", "agents.svg"),
     ("dcc-ssh", "SSH", "ssh.svg"),
     ("dcc-code", "Code", "code.svg"),
+    ("dcc-config", "AI config", "config.svg"),
 ];
 
 const ANCHOR_ENABLED: &str =
