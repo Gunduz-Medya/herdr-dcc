@@ -137,6 +137,7 @@ pub fn record(store: &Store, run_id: &str, f: &HookFacts, ts_ms: i64) -> Result<
         session_id: f.session_id.clone(),
         ts_ms,
         kind: f.event.clone(),
+        state: None,
         tool_name: f.tool_name.clone(),
         notification_type: f.notification_type.clone(),
     })

@@ -85,7 +85,11 @@ fn close(store: &Store, run: &mut Run, c: Closing, now: i64, finished: Option<i6
     if run.last_state != c.state.as_str() {
         run.last_state_ms = ended;
     }
+    let changed = run.last_state != c.state.as_str();
     run.last_state = c.state.as_str().to_string();
+    if changed {
+        store.insert_state_change(&run.id, ended, c.state.as_str())?;
+    }
     run.end_reason = Some(c.reason.to_string());
     run.exit_code = c.exit_code;
     run.herdr_status = None;
@@ -141,7 +145,7 @@ fn update_live(
         );
     }
     run.herdr_status = t.status.clone();
-    let last = store.last_event(&run.id)?;
+    let last = store.last_hook(&run.id)?;
     let (state, _) = map_state(&StateInput {
         live: true,
         status: t.status.as_deref(),
@@ -153,6 +157,7 @@ fn update_live(
     if run.last_state != state.as_str() {
         run.last_state = state.as_str().to_string();
         run.last_state_ms = opts.now_ms;
+        store.insert_state_change(&run.id, opts.now_ms, state.as_str())?;
     }
     store.update_run(run)
 }
@@ -206,7 +211,7 @@ fn note_code(run: &Run, state: &str) -> String {
 fn row(store: &Store, run: &Run, shared: &HashSet<String>) -> Result<Value> {
     let sessions = store.sessions_of(&run.id)?;
     let latest = sessions.last();
-    let last = store.last_event(&run.id)?;
+    let last = store.last_hook(&run.id)?;
     let git_ok = run.repo_root.is_some();
     Ok(json!({
         "run_id": run.id, "kind": run.agent_kind, "launch_mode": run.launch_mode,
@@ -273,7 +278,7 @@ pub fn snapshot(store: &Store, src: &dyn AgentSource, opts: &RecordOptions) -> R
                 None,
             )?,
             Some(t) if !t.live => {
-                let last = store.last_event(&run.id)?;
+                let last = store.last_hook(&run.id)?;
                 let (state, code) = map_state(&StateInput {
                     live: false,
                     exit_code: t.exit_code,
@@ -860,6 +865,61 @@ mod tests {
                 g["staged"].as_i64()
             ),
             (Some("dcc/one"), Some("linked"), Some(1), Some(1))
+        );
+    }
+
+    #[test]
+    fn state_changes_are_written_once_each_and_are_not_hooks() {
+        let repo = scratch_repo("rec-changes");
+        let store = Store::open_in_memory().unwrap();
+        let cwd = repo.to_str().unwrap();
+        for (now, status) in [
+            (1000, "idle"),
+            (2000, "working"),
+            (3000, "working"),
+            (4000, "blocked"),
+            (5000, "done"),
+        ] {
+            snapshot(
+                &store,
+                &FixedSource(vec![live("t1", Some(status), cwd, 100)]),
+                &opts(now),
+            )
+            .unwrap();
+        }
+        let id = "ext-t1-100";
+        let changes: Vec<(i64, String)> = store
+            .events_of(id)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind == "state_change")
+            .map(|e| (e.ts_ms, e.state.unwrap()))
+            .collect();
+        assert_eq!(
+            changes,
+            vec![
+                (1000, "Waiting".to_string()),
+                (2000, "Running".to_string()),
+                (4000, "Waiting".to_string()),
+                (5000, "Completed".to_string())
+            ]
+        );
+        assert!(
+            store.last_hook(id).unwrap().is_none(),
+            "state changes do not count as the last hook event"
+        );
+        // an ended run records its final state too
+        let doc = snapshot(&store, &FixedSource(vec![]), &opts(6000)).unwrap();
+        assert_eq!(doc["runs"][0]["dcc_state"], "Stopped");
+        assert_eq!(
+            store
+                .events_of(id)
+                .unwrap()
+                .last()
+                .unwrap()
+                .state
+                .as_deref(),
+            Some("Stopped")
         );
     }
 }

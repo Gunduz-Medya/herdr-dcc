@@ -20,7 +20,11 @@ pub fn git(cwd: &str, args: &[&str]) -> Option<String> {
 }
 
 pub fn git_with_timeout(cwd: &str, args: &[&str], timeout: Duration) -> Option<String> {
+    // `core.fsmonitor` in a repository's own config is a command that `git status` runs. DCC reads
+    // folders of agents and terminals, some of them cloned from places nobody vetted, so that hook
+    // is switched off for every read only call. `--no-optional-locks` keeps the index untouched.
     let mut child = Command::new("git")
+        .args(["-c", "core.fsmonitor=false"])
         .arg("--no-optional-locks")
         .arg("-C")
         .arg(cwd)
@@ -343,6 +347,53 @@ mod tests {
             "external"
         );
         assert!(wt.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_repository_cannot_run_its_own_fsmonitor_command_through_dcc() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = scratch_repo("git-fsmonitor");
+        let marker = d.join("..").join(format!(
+            "{}-marker",
+            d.file_name().unwrap().to_string_lossy()
+        ));
+        let script = d.join("..").join(format!(
+            "{}-hook.sh",
+            d.file_name().unwrap().to_string_lossy()
+        ));
+        fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\necho ran > '{}'\nprintf '\\0'\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        sh(&d, &["config", "core.fsmonitor", script.to_str().unwrap()]);
+
+        // positive control, plain git does run the configured command
+        let plain = Command::new("git")
+            .arg("-C")
+            .arg(&d)
+            .args(["status", "--porcelain"])
+            .output()
+            .unwrap();
+        assert!(plain.status.success());
+        assert!(
+            marker.exists(),
+            "the control must show that the config really runs a command"
+        );
+        fs::remove_file(&marker).unwrap();
+
+        // through dcc it does not
+        let i = info(d.to_str().unwrap()).unwrap();
+        assert_eq!(i.changed, Some(0));
+        assert!(
+            !marker.exists(),
+            "dcc ran the fsmonitor command of the repository"
+        );
     }
 
     #[test]

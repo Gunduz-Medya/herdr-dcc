@@ -6,6 +6,10 @@
 //!   dcc-fixture-agent --mode ok       the sequence above
 //!   dcc-fixture-agent --mode broken   sequences that are not valid reports (the test must fail)
 //!   dcc-fixture-agent --step-ms 1200  pause between steps
+//!   dcc-fixture-agent --exit-code 3   exit with this code at the end (default 0)
+//!   dcc-fixture-agent --wait          keep running after the sequence until it is killed
+//! Other arguments are ignored, so the program can stand in for an agent that is started with
+//! `--session-id`, `--settings` and the like.
 
 use std::io::Write;
 use std::time::Duration;
@@ -30,5 +34,11 @@ fn main() {
         osc(s);
         std::thread::sleep(step);
     }
+    if args.iter().any(|a| a == "--wait") {
+        loop {
+            std::thread::sleep(Duration::from_secs(3600));
+        }
+    }
     std::thread::sleep(step);
+    std::process::exit(value("--exit-code").and_then(|v| v.parse().ok()).unwrap_or(0));
 }

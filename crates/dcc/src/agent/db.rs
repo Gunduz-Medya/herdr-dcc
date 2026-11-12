@@ -52,7 +52,10 @@ pub struct Event {
     pub run_id: String,
     pub session_id: Option<String>,
     pub ts_ms: i64,
+    /// A hook name, or `state_change` (written by the snapshot when the DCC state changes).
     pub kind: String,
+    /// The new DCC state, for `state_change` events.
+    pub state: Option<String>,
     pub tool_name: Option<String>,
     pub notification_type: Option<String>,
 }
@@ -196,29 +199,47 @@ impl Store {
 
     pub fn insert_event(&self, e: &Event) -> Result<()> {
         self.conn().execute(
-            "INSERT INTO agent_events (run_id, session_id, ts_ms, kind, tool_name, notification_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![e.run_id, e.session_id, e.ts_ms, e.kind, e.tool_name, e.notification_type],
+            "INSERT INTO agent_events (run_id, session_id, ts_ms, kind, state, tool_name, notification_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![e.run_id, e.session_id, e.ts_ms, e.kind, e.state, e.tool_name, e.notification_type],
         )?;
         Ok(())
     }
 
+    /// Records a change of the DCC state.
+    pub fn insert_state_change(&self, run_id: &str, ts_ms: i64, state: &str) -> Result<()> {
+        self.insert_event(&Event {
+            run_id: run_id.to_string(),
+            session_id: None,
+            ts_ms,
+            kind: "state_change".into(),
+            state: Some(state.to_string()),
+            tool_name: None,
+            notification_type: None,
+        })
+    }
+
     pub fn events_of(&self, run_id: &str) -> Result<Vec<Event>> {
-        let mut stmt = self.conn().prepare("SELECT run_id, session_id, ts_ms, kind, tool_name, notification_type FROM agent_events WHERE run_id = ?1 ORDER BY ts_ms, id")?;
+        let mut stmt = self.conn().prepare("SELECT run_id, session_id, ts_ms, kind, state, tool_name, notification_type FROM agent_events WHERE run_id = ?1 ORDER BY ts_ms, id")?;
         let rows = stmt.query_map(params![run_id], |r| {
             Ok(Event {
                 run_id: r.get(0)?,
                 session_id: r.get(1)?,
                 ts_ms: r.get(2)?,
                 kind: r.get(3)?,
-                tool_name: r.get(4)?,
-                notification_type: r.get(5)?,
+                state: r.get(4)?,
+                tool_name: r.get(5)?,
+                notification_type: r.get(6)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
-    pub fn last_event(&self, run_id: &str) -> Result<Option<Event>> {
-        Ok(self.events_of(run_id)?.pop())
+    /// The last hook event of a run (state changes are not hooks).
+    pub fn last_hook(&self, run_id: &str) -> Result<Option<Event>> {
+        Ok(self
+            .events_of(run_id)?
+            .into_iter()
+            .rfind(|e| e.kind != "state_change"))
     }
 }
 
@@ -312,6 +333,7 @@ mod tests {
             session_id: Some("s".into()),
             ts_ms: 1,
             kind: "PreToolUse".into(),
+            state: None,
             tool_name: Some("Write".into()),
             notification_type: None,
         })
@@ -321,11 +343,22 @@ mod tests {
             session_id: None,
             ts_ms: 2,
             kind: "Stop".into(),
+            state: None,
             tool_name: None,
             notification_type: None,
         })
         .unwrap();
-        assert_eq!(s.last_event("r").unwrap().unwrap().kind, "Stop");
-        assert_eq!(s.events_of("r").unwrap().len(), 2);
+        assert_eq!(s.last_hook("r").unwrap().unwrap().kind, "Stop");
+        s.insert_state_change("r", 3, "Running").unwrap();
+        assert_eq!(
+            s.last_hook("r").unwrap().unwrap().kind,
+            "Stop",
+            "a state change is not a hook"
+        );
+        assert_eq!(
+            s.events_of("r").unwrap().last().unwrap().state.as_deref(),
+            Some("Running")
+        );
+        assert_eq!(s.events_of("r").unwrap().len(), 3);
     }
 }
