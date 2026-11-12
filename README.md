@@ -1,6 +1,6 @@
 # herdr-dcc
 
-**Developer Command Center (DCC)** is an add-on for the [Herdr](https://herdr.dev) desktop terminal app. It puts everything a developer who works with several AI coding agents needs into one window: what each agent is doing, where it works, which servers you are connected to, your Git state and your AI tool configuration.
+**Developer Command Center (DCC)** is an add-on for the Herdr desktop terminal app. It puts everything a developer who works with several AI coding agents needs into one window: what each agent is doing, where it works, which servers you are connected to, your Git state and your AI tool configuration.
 
 DCC does not replace your tools. It connects the ones that already work well (Herdr, lazygit, neovim, Skillshare, ssh) and adds the missing glue as a small Rust helper (`dcc`) and a set of Herdr panels.
 
@@ -59,7 +59,7 @@ flowchart LR
 
 ## Requirements
 
-- macOS on Apple Silicon, [Herdr](https://herdr.dev) (tested with app 0.1.15 and core 0.1.20, pinned in `compat.toml`)
+- macOS on Apple Silicon, the Herdr desktop app (tested with app 0.1.15 and core 0.1.20, pinned in `compat.toml`)
 - Rust (current stable) to build
 - Optional: lazygit, neovim, [Skillshare](https://skillshare.runkids.cc) and Claude Code for the matching features. DCC installs nothing for you and tells you what is missing.
 
