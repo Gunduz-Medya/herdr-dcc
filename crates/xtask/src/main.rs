@@ -118,13 +118,25 @@ fn dev_down() -> R<Value> {
             killed.push(t.address);
         }
     }
-    // Holder processes appear once terminals exist, so ask again while the core still runs.
-    pids.extend(core::pids().map_err(|e| e.message)?);
+    // Holder processes appear once terminals exist and the core pid changes when the core is
+    // restarted, so ask again. `hc server status` starts a core when none runs, so it is only
+    // asked while the window is alive (the window keeps a core of its own anyway), and a failure
+    // here never stops the shutdown, it is reported in the result.
+    let app_pid = doc["app"].as_u64().ok_or("no app pid")? as u32;
+    let mut probe_error = Value::Null;
+    if process_alive(app_pid).unwrap_or(false) {
+        match core::pids() {
+            Ok(extra) => pids.extend(extra),
+            Err(e) => probe_error = json!(e.message),
+        }
+    } else {
+        probe_error = json!("the window was not running, core pids were not asked");
+    }
     pids.sort_unstable();
     pids.dedup();
     let _ = Command::new("herdr-app").args(["do", "app.quit"]).output();
     std::thread::sleep(Duration::from_secs(2));
-    let stopped = core::stop().map_err(|e| e.message)?;
+    let stopped = core::stop().unwrap_or_else(|e| json!({ "stop_error": e.message }));
     let start = Instant::now();
     let alive = loop {
         let alive = core::alive_of(&pids).map_err(|e| e.message)?;
@@ -135,7 +147,7 @@ fn dev_down() -> R<Value> {
     };
     if alive.is_empty() {
         Ok(
-            json!({ "closed": true, "checked": pids, "terminals_killed": killed, "core_stop": stopped }),
+            json!({ "closed": true, "checked": pids, "terminals_killed": killed, "core_stop": stopped, "pid_probe": probe_error }),
         )
     } else {
         Err(format!("still running after the shutdown: {alive:?}"))

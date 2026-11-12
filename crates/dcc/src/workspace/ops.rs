@@ -49,6 +49,19 @@ pub fn find_space(h: &dyn Herdr, selector: &str) -> Result<SpaceInfo> {
     }
 }
 
+/// A space by name only (never by id), refusing a name that more than one space uses. Used where
+/// commands are typed into terminals, so a name that matches the id of another space cannot redirect them.
+pub fn find_space_by_name(h: &dyn Herdr, name: &str) -> Result<SpaceInfo> {
+    let mut hits: Vec<SpaceInfo> = h.spaces()?.into_iter().filter(|s| s.name == name).collect();
+    match hits.len() {
+        0 => Err(Error::not_found(format!("no open space called {name}"))),
+        1 => Ok(hits.remove(0)),
+        n => Err(Error::conflict(format!(
+            "{n} spaces are called {name}, close or rename the extra ones first"
+        ))),
+    }
+}
+
 /// `TAB=CMD` runs CMD in the first pane of that tab, `TAB:2=CMD` in the second.
 pub fn parse_startups(items: &[String]) -> Result<HashMap<(String, usize), String>> {
     let mut map = HashMap::new();
@@ -121,17 +134,22 @@ struct Ctx<'a> {
     opts: Options,
     warnings: Vec<String>,
     sent: Vec<Value>,
+    skipped: Vec<Value>,
     terminals: Vec<String>,
+    /// Terminals started in the project folder because their saved folder is gone. A startup
+    /// command written for the saved folder is not typed there.
+    substituted: HashSet<String>,
 }
 
 impl Ctx<'_> {
-    fn usable(&mut self, cwd: &str) -> String {
+    /// The folder to start in, and whether it replaced the saved one.
+    fn usable(&mut self, cwd: &str) -> (String, bool) {
         if !self.opts.check_dirs || Path::new(cwd).is_dir() {
-            cwd.to_string()
+            (cwd.to_string(), false)
         } else {
             self.warnings
                 .push(format!("{cwd} is gone, used {}", self.project));
-            self.project.clone()
+            (self.project.clone(), true)
         }
     }
 }
@@ -158,9 +176,13 @@ fn realize(ctx: &mut Ctx, node: &Node, pane: &str, terminal: &str) -> Result<()>
         Node::Pane { startup, .. } => {
             ctx.terminals.push(terminal.to_string());
             if let Some(cmd) = startup {
-                ctx.h.send(terminal, cmd)?;
-                ctx.sent
-                    .push(json!({ "terminal": terminal, "command": cmd }));
+                if ctx.substituted.contains(terminal) {
+                    ctx.skipped.push(json!({ "terminal": terminal, "reason": "the saved folder is gone, the pane started in the project folder" }));
+                } else {
+                    ctx.h.send(terminal, cmd)?;
+                    ctx.sent
+                        .push(json!({ "terminal": terminal, "command": cmd }));
+                }
             }
             Ok(())
         }
@@ -171,12 +193,15 @@ fn realize(ctx: &mut Ctx, node: &Node, pane: &str, terminal: &str) -> Result<()>
         } => {
             // The second part takes its first pane from a split of this pane, then both parts grow.
             ctx.h.app_do("pane.focus", json!({ "pane": pane }))?;
-            let folder = ctx.usable(second.first_cwd());
+            let (folder, substituted) = ctx.usable(second.first_cwd());
             let made = ctx.h.app_do(
                 "terminal.open",
                 json!({ "folder": folder, "place": direction.as_str() }),
             )?;
             let (new_pane, new_terminal) = (text(&made, "pane")?, text(&made, "terminal")?);
+            if substituted {
+                ctx.substituted.insert(new_terminal.clone());
+            }
             realize(ctx, first, pane, terminal)?;
             realize(ctx, second, &new_pane, &new_terminal)
         }
@@ -200,12 +225,14 @@ pub fn build(h: &dyn Herdr, def: &Definition, opts: Options) -> Result<Value> {
         opts,
         warnings: Vec::new(),
         sent: Vec::new(),
+        skipped: Vec::new(),
         terminals: Vec::new(),
+        substituted: HashSet::new(),
     };
     let mut space_id = String::new();
     let mut tabs_report = Vec::new();
     for (i, tab) in def.tabs.iter().enumerate() {
-        let folder = ctx.usable(tab.tree.first_cwd());
+        let (folder, substituted) = ctx.usable(tab.tree.first_cwd());
         let made = if i == 0 {
             let mut args = json!({ "name": def.name, "folder": folder });
             if tab.named {
@@ -223,21 +250,24 @@ pub fn build(h: &dyn Herdr, def: &Definition, opts: Options) -> Result<Value> {
             space_id = text(&made, "space")?;
         }
         let terminal = text(&made, "terminal")?;
+        if substituted {
+            ctx.substituted.insert(terminal.clone());
+        }
         let pane = pane_of(h, &terminal)?;
         ctx.terminals.clear();
         realize(&mut ctx, &tab.tree, &pane, &terminal)?;
         tabs_report.push(json!({ "tab": tab.name, "terminals": ctx.terminals }));
     }
     Ok(
-        json!({ "restored": def.name, "kind": def.kind, "space": space_id, "tabs": tabs_report, "startup_commands": ctx.sent, "warnings": ctx.warnings }),
+        json!({ "restored": def.name, "kind": def.kind, "space": space_id, "tabs": tabs_report, "startup_commands": ctx.sent, "skipped": ctx.skipped, "warnings": ctx.warnings }),
     )
 }
 
 /// For a space that survived a core restart. Types the startup commands into the terminals that
-/// are plain shells again. A terminal that already runs a program is left alone and reported.
+/// are plain shells again and still in their saved folder. Anything else is left alone and reported.
 pub fn rehydrate(h: &dyn Herdr, def: &Definition) -> Result<Value> {
-    // find_space refuses a name used by more than one space, so commands cannot land in the wrong one
-    let space = find_space(h, &def.name).map_err(|e| {
+    // by name only, and a name used twice is refused, so commands cannot land in the wrong space
+    let space = find_space_by_name(h, &def.name).map_err(|e| {
         if e.kind == "not_found" {
             Error::not_found(format!(
                 "no open space called {}. Use restore to build it",
@@ -609,5 +639,45 @@ mod tests {
             r["skipped"][0]["reason"],
             "the folder differs from the saved one"
         );
+    }
+
+    #[test]
+    fn no_startup_command_is_typed_where_the_folder_was_replaced() {
+        let h = FakeHerdr::new();
+        let project = scratch_dir("ws-nostartup");
+        let good = project.to_string_lossy().to_string();
+        let def = Definition {
+            name: "w".into(),
+            folder: good.clone(),
+            kind: "snapshot".into(),
+            tabs: vec![TabDef {
+                name: "1".into(),
+                named: false,
+                tree: Node::Split {
+                    direction: crate::workspace::Direction::Right,
+                    first: Box::new(Node::pane("/definitely/not/here", Some("typed-by-mistake"))),
+                    second: Box::new(Node::pane(&good, Some("echo fine"))),
+                },
+            }],
+        };
+        let r = build(&h, &def, Options::default()).unwrap();
+        assert_eq!(typed_commands(&h), vec!["echo fine"]);
+        assert_eq!(r["skipped"].as_array().unwrap().len(), 1);
+        assert_eq!(r["warnings"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn rehydrate_matches_by_name_only() {
+        let h = FakeHerdr::new();
+        let def = templates::instantiate("code", "proj", "/work/proj").unwrap();
+        build(&h, &def, offline()).unwrap();
+        h.restart_core();
+        // a definition named like the id of the open space must not match that space
+        let id = h.spaces().unwrap()[0].id.clone();
+        let by_id = Definition {
+            name: id,
+            ..def.clone()
+        };
+        assert_eq!(rehydrate(&h, &by_id).unwrap_err().kind, "not_found");
     }
 }
