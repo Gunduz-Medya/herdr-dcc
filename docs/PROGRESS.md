@@ -144,3 +144,26 @@ Kullanıcı dört panelin terminali kapattığını söyledi ve panellerin sağ 
 - Açık sorun.
   - `herdr-app shot` Herdr'ın son kare görüntüsünü veriyor, `screencapture` yerine bunu kullanmak gerekiyor.
   - Bir panel açıkken diğer panel görünmüyor, yan yana iki DCC paneli gösterilemez. Panel genişliği Herdr'ın `panel` düğümünden geliyor (min 280).
+
+## Faz 5, AI konfigürasyon (2026-11-12, branch `phase-5-ai-config`)
+
+- Ne yapıldı.
+  - Envanter (`dcc config inventory`). Claude, Codex, Gemini, Cursor ve Skillshare için bilinen yollar taranıyor. Her öğe için yol (`~/` ile), tür (skill, agent, command, rule, hook, plugin, settings, memory, mcp), boyut, değişiklik zamanı, link olup olmadığı. Hiçbir dosya açılmıyor, yalnızca dosya sistemi üst bilgisi okunuyor (okunamayan dosya testi bunu gösteriyor). Linkler izlenmiyor. Kimlik bilgisi gibi görünen adlar (`auth.json`, `.env*`, `*token*`, `*credential*` ve benzerleri) listelenmiyor, yalnızca sayılıyor.
+  - Skillshare çağrıları (`config skillshare status|list`, `config sync preview|apply`). DCC'nin kendi senkron motoru yok. Önizleme `skillshare diff --json` ve `sync --dry-run --json` çıktısından özet (eklenecek, güncellenecek, silinecek) ve o durumun özeti olan bir hash üretiyor, hiçbir şey yazmıyor.
+  - Güvenli yazma. `apply` yalnızca gösterilen önizlemenin hash'iyle çalışıyor (durum değişmişse reddediyor), önce Skillshare'in kendi yedeğini (`backup --all`) alıyor ve yedek başarısızsa hiçbir şeyi senkronlamıyor. Bir şey silecek senkron ayrı `--allow-delete` onayı istiyor, onay yoksa yedek bile alınmadan reddediliyor. Uygulama job olarak çalışıyor.
+  - İzolasyon kuralı. Geliştirme ortamında (`DCC_REQUIRE_ISOLATION=1`) `config` komutları `DCC_AI_HOME` veya `--home` olmadan çalışmıyor, gerçek ev klasörüne yanlışlıkla gidilemiyor.
+  - `dcc-config` modu (agent başına özet, önizleme, ayrı silme onayı, job durumu) ve tab çubuğunda "AI config" düğmesi (artık altı panel düğmesi var).
+- Test sonucu.
+  - `cargo test` 140 birim, 7 agent CLI, 8 CLI, 4 ssh CLI, 2 git CLI, 4 config CLI, 3 xtask testi geçti. `cargo clippy --all-targets` temiz.
+  - Kabul 1 geçti. Envanter yolları ve türleri listeliyor, içerik yok (işaretli içerik çıktıda yok, okunamayan dosya yine listelendi).
+  - Kabul 2 geçti. Önizleme yazmadan diff gösteriyor, `.claude` ağacı önizlemeden önce ve sonra aynı. Yedek `apply` içinde senkrondan önce alınıyor (birim testte sıra, entegrasyon testinde `backup --list` kaydı).
+  - Kabul 3 geçti. Gerçek Skillshare ile kaynaktan silinen skill'in senkronu `--allow-delete` olmadan reddedildi, hedefte duruyor, onayla silindi.
+  - Kabul 4 geçti. Önizleme ve `apply` sırasında `settings.json` ve diğer `.claude` dosyalarına DCC dokunmadı (önizleme için ağaç karşılaştırması, `apply` için ayarlar dosyasının içeriği aynı). `.claude/skills` altına Skillshare link yazdı, bu Skillshare'in işi ve yalnızca onaylı `apply` ile oluyor.
+  - Canlı senaryo (izole Herdr, `.dev/ai-home` sahte ev klasörü). Panel ekran görüntüsü (`herdr-app shot`) envanteri gösterdi. Mod'un çağırdığı komutlar CLI'dan koşturuldu. Önizleme 1 ekleme gösterdi, job `apply` bitti (çıkış 0), sonraki önizleme 0 değişiklik verdi. `dev-down` uygulama ve çekirdeği PID ile kapalı doğruladı.
+  - Gerçek `~` ve `~/.claude` hiçbir testte kullanılmadı.
+- Açık sorun.
+  - Panel düğmelerine (Preview, Apply) gerçek fare tıklaması yapılmadı, aynı komutlar CLI'dan denendi. Panelin önizleme görünümü görülmedi.
+  - Skillshare yalnızca skills için önizleniyor ve senkronlanıyor (agents, extras, MCP, hooks, plugins senkronu bu fazda yok). Envanter Claude Code'un MCP ve hook ayarlarının içine bakmıyor (içerik okunmadığı için), yalnızca dosya olarak görünüyor.
+  - Skillshare'in yedek geri yükleme akışı DCC'den çağrılmıyor, ekranda `skillshare restore` yazıyor.
+  - Skillshare 0.30.2 ile denendi. Çıktı biçimi değişirse önizleme hata verir (JSON yoksa reddeder), sessizce yanlış sonuç vermez.
+  - Gerçek kullanıcı ev klasöründe `apply` hiç çalıştırılmadı (kural gereği). Yalnızca gerçek Skillshare ile sahte ev klasöründe.

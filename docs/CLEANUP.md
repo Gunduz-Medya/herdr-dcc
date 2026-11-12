@@ -46,3 +46,6 @@ Faz 3 testlerinden kalanlar (silinmedi).
 - `~/dev/dcc/.dev/ssh/id_pp` ve `id_pp.pub` (test passphrase'li anahtar), `authorized_keys` içindeki `dcc-test` satırı, `client_config`, `known_hosts`, `sshd.log`
 - Test profilleri ve yönlendirmeler `.dev/scratch-data` içindeki SQLite'ta (profiller `--confirm` ile silindi)
 - Silinen (test amaçlı kendi oluşturduğum) Keychain kaydı: servis `dcc`, ad `ssh.pp1`
+
+Faz 5 testlerinden kalanlar (silinmedi).
+- `~/dev/dcc/.dev/ai-home` (sahte ev klasörü, Skillshare yapılandırması ve yedekleri dahil)
