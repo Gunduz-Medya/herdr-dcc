@@ -35,3 +35,9 @@ Silinecekler adayları.
 Not. `~/.claude` altındaki yollar yalnızca liste olarak yazıldı, bu depodaki çalışma sırasında bu dizine dokunulmadı.
 
 Spike'ta tutulanlar (Adım 7 sonrası için). `agent-sandbox` ve `agent-sandbox-wt1` repoları, `logs/`, `scratch-home`, `scratch-xdg`, `scratch-data`, `toolchain`.
+
+Faz 2 testlerinden kalanlar (silinmedi).
+- `~/dev/dcc/.dev/p2-repo` ve `~/dev/dcc/.dev/p2-repo.worktrees/*` (test deposu ve agent worktree'leri, `dcc/*` branch'leri)
+- `~/dev/dcc/.dev/scratch-data/agents/*` (agent ayar dosyaları)
+- `~/dev/dcc/.dev/p2-panel.png`, `~/dev/dcc/.dev/p2-empty.png`
+- `~/.claude/projects/-Users-barisgunduz-dev-dcc--dev-p2-repo.worktrees-08b85856` (gerçek Claude Code'un yazdığı oturum dosyası, DCC yazmadı)

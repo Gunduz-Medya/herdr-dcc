@@ -55,3 +55,25 @@ Her bölüm bir faz kaydıdır. Her kayıtta faz, tarih, ne yapıldı, test sonu
   - `secret-leak` BSD `script` kullanıyor (yalnızca macOS), `process_alive` yalnızca Unix. Windows'ta hiçbir şey denenmedi.
   - Modün `config.json` dosyası `dcc` ikilisinin o anki yolunu (debug derlemesi) yazıyor, kurulum yolu Faz sonrası netleşecek.
   - Katmanlı (`.dev`) araç zinciri kopyası spike'tan salt okunur kopyalandı, spike klasörü değişmedi.
+
+## Faz 2, agent paneli ve oturum kaydı (2026-11-12, branch `phase-2-agents`)
+
+- Ne yapıldı.
+  - `agent` modülleri (durum eşleme, adapter, hook ve statusline günlükleri, `exec`, `launch`, kayıt, sözleşme testi). SQLite göçü v2 (`agent_runs`, `agent_sessions`, `agent_events`). `dcc-fixture-agent` ve `dcc-agents` modu (salt okunur panel, 2 sn yenileme).
+  - Hook günlüğü `DCC_RUN_ID` ile doğrudan SQLite'a yazıyor, snapshot çekirdeği kendisi sorguluyor. `agent interrupt` ve `agent stop` yok, Stopped yalnızca dışarıdan öldürülen süreç demek.
+  - Güvenlik sertleştirmesi. Salt okunur git çağrılarında fsmonitor kapalı. `git status` deponun clean filtrelerini boşaltıyor ve alt modülleri atlıyor (pozitif kontrol testleriyle). Hook alanları beyaz listeli, kimlikler doğrulanıyor, worktree silme `--confirm` istiyor.
+- Test sonucu.
+  - `cargo test` 104 birim, 7 agent CLI, 8 CLI, 3 xtask testi geçti. `cargo clippy --all-targets` temiz.
+  - Canlı senaryolar (izole Herdr).
+    1. Kabul 1 geçti. Üç worktree agent'ı üç ayrı branch ve klasörle ayrı satırlar olarak kaydedildi (panel verisi `dcc agent snapshot` ile okundu).
+    2. Kabul 3 geçti. Çıkış kodu 0 Completed (`exited_ok`), 3 Failed (`exit_nonzero`), `hc kill` Stopped (`killed`).
+    3. Kabul 4 geçti. Gerçek Claude Code `hc run` ile başlatıldı, ilk oturum kimliği argv ile aynı geldi. Hook'lara `DCC_RUN_ID` ulaştı (SessionStart, UserPromptSubmit, Stop, SessionEnd). `/clear` sonrası aynı çalıştırmaya bağlı ikinci oturum açıldı (`session_count` 2). Kullanıcı güven ve izin sorularını kendisi yanıtladı. Olaylarda yalnızca olay adları, araç adı ve bildirim türü var.
+    4. Kabul 6 geçti. Sözleşme testi ok fixture ile geçti, broken fixture ile `status_reliable` false oldu, sonraki ok ile düzeldi.
+    5. Kabul 7 geçti. İki agent aynı klasörde `shared_folder` uyarısı verdi, biri durunca uyarı kalktı.
+    6. Kabul 5 birim ve entegrasyon testleriyle geçti (hook adlar dışında alan yazmıyor, kötü bayrakta sıfır çıkış, ortalama yaklaşık 5 ms).
+- Açık sorun.
+  - Kabul 2 ölçülmedi. Panel 2 sn aralıkla sorguluyor ve snapshot 48 ms sürüyor, yani medyan hedefi tasarım gereği tutuyor ama gerçek gecikme ölçülmedi.
+  - Panelin görseli bu fazda doğrulanamadı. Herdr penceresi ekran görüntüsüne gelmedi ve pencereyi öne almak için erişilebilirlik izni gerekiyordu, verilmedi. Boş durum görüntüsü (`.dev/p2-empty.png`) yalnızca ilk kurulumda alındı.
+  - Güven sorusu bekleyen agent'ın Unknown notu gerçek Claude ile ayrıca denenmedi.
+  - Starting shell pane'inin kapatılması canlı doğrulandı mı sorusu yalnızca agent'ların tek pane ile açılmasından dolaylı görüldü, ayrı test yok.
+  - Gerçek Claude testi kullanıcı hesabıyla yapıldı, kota alanına bakılmadı (Faz 6).
